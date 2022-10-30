@@ -1,2 +1,1 @@
-# quizprog-gui
-QuizProg GUI edition
+Coming soon...
