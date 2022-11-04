@@ -1,1 +1,2 @@
-Coming soon...
+QuizProg GUI edition.  
+[Console version](../../../quizprog)
