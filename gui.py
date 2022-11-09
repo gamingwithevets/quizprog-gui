@@ -7,19 +7,16 @@ import tkinter.font
 import tkinter.messagebox
 import tkinter.filedialog
 
-def report_error(self = None, exc = None, val = None, tb = None):
-	if exc == None: exc = traceback.format_exc()
-
-
+def report_error(self, exc, val, tb):
 	try: GUI.window.quit()
 	except Exception: pass
-	print(f'Whoops! QuizProg-GUI has suffered a very fatal error.\n\n{exc}\nIf this error persists, please report it here:\nhttps://github.com/gamingwithevets/quizprog-gui/issues')
-	tk.messagebox.showerror('Whoops!', f'QuizProg-GUI has suffered a very fatal error.\n\n{exc}\nIf this error persists, please report it here:\nhttps://github.com/gamingwithevets/quizprog-gui/issues')
+	print(f'Whoops! QuizProg-GUI has suffered a very fatal error.\n\n{traceback.format_exc()}\nIf this error persists, please report it here:\nhttps://github.com/gamingwithevets/quizprog-gui/issues')
+	tk.messagebox.showerror('Whoops!', f'QuizProg-GUI has suffered a very fatal error.\n\n{traceback.format_exc()}\nIf this error persists, please report it here:\nhttps://github.com/gamingwithevets/quizprog-gui/issues')
 	sys.exit()
 
 tk.Tk.report_callback_exception = report_error
 
-version = 'Beta 1.0.0'
+version = 'Beta 1.0.1'
 about_msg = f'''\
 QuizProg-GUI - {version}
 Project page: https://github.com/gamingwithevets/quizprog-gui
@@ -64,7 +61,7 @@ class GUI():
 
 		self.message = ('Welcome to QuizProg-GUI! Any messages will appear here.', False)
 		self.datafile = {'title': 'My Quiz', 'questions': [{'question': 'Question', 'a': 'Answer A', 'b': 'Answer B', 'c': 'Answer C', 'd': 'Answer D', 'correct': 'a'}]}
-		self.datafile_mode = 'qpg'
+		self.datafile_mode = 'json'
 
 		self.savepath = ''
 		self.allowsave = True
@@ -72,19 +69,23 @@ class GUI():
 		self.modified = False
 
 		self.jsonhandler = JSONHandler(self)
+		self.quizconf = QuizConf(self)
 		self.init_window()
 		self.menubar()
 		self.init_protocols()
 		
 		self.main_menu()
 
-	def n_a(self): tk.messagebox.showinfo('Not implemented', 'This feature is not implemented into QuizProg-GUI... yet.\n\nIn the meantime you could use the console version!\nLink to it in the README file.')
+	def n_a(self): tk.messagebox.showinfo('Not implemented', 'This feature is not implemented into QuizProg-GUI... yet.\nSorry!')
 
-	def refresh(self, load_func = False):
+	def refresh(self, load_func = False, custom_func = None):
 		for w in self.window.winfo_children(): w.destroy()
 		self.menubar()
+		self.set_title()
 
-		if load_func: self.main_menu()
+		if load_func:
+			if custom_func == None: self.main_menu()
+			else: custom_func() 
 
 	def quit(self):
 		cancel = self.prompt_save_changes()
@@ -223,8 +224,6 @@ class GUI():
 	"""--------- BEGIN MENUS ---------"""
 
 	def main_menu(self):
-
-		self.set_title()
 		self.print_msg()
 
 		self.draw_label('You are editing:')
@@ -280,10 +279,26 @@ class GUI():
 		entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set)
 		entry.insert('end', self.datafile['description'])
 		scroll.config(command = entry.yview)
-		scroll.pack(side = tk.RIGHT, fill = 'y')
-		entry.pack(side = tk.LEFT)
+		scroll.pack(side = 'right', fill = 'y')
+		entry.pack(side = 'left')
 
-	def quiz_conf(self):
+	def quiz_conf(self): self.quizconf.main()
+
+	"""----------- END MENUS ---------"""
+
+class QuizConf():
+	def __init__(self, gui):
+		self.gui = gui
+
+		self.display_w = self.gui.display_w
+		self.jsonhandler = self.gui.jsonhandler
+		self.refresh = self.gui.refresh
+		self.modified = self.gui.modified
+		self.draw_label = self.gui.draw_label
+
+	def main(self):
+		self.datafile = self.gui.datafile
+
 		if not self.jsonhandler.check_element('lives', int): self.datafile['lives'] = 0
 		if not self.jsonhandler.check_element('randomize', bool): self.datafile['randomize'] = False
 		if not self.jsonhandler.check_element('showcount', bool): self.datafile['showcount'] = True
@@ -291,78 +306,171 @@ class GUI():
 		if not self.jsonhandler.check_element('fail'): self.datafile['fail'] = ''
 		if not self.jsonhandler.check_element('finish'): self.datafile['finish'] = ''
 
-		def save():
-			text = life_entry.get()
-			try:
-				if int(text) != self.datafile['lives']:
-					self.datafile['lives'] = int(text)
-					self.modified = True
-			except ValueError:
-				if text == '': tk.messagebox.showerror('Error', 'Life count cannot be blank!')
-				else: tk.messagebox.showerror('Error', 'Life count must only contain an integer!')
-			randval = rand_value.get()
-			if randval != self.datafile['randomize']:
-				self.datafile['randomize'] = randval
-				self.modified = True
+		self.wrongmsg_list = self.datafile['wrongmsg']
+		self.fail_text = self.datafile['fail']
+		self.finish_text = self.datafile['finish']
 
-			scval = showcount_value.get()
-			if scval != self.datafile['showcount']:
-				self.datafile['showcount'] = scval
-				self.modified = True
-			
-			self.set_title()
+		self.menu()
 
-		def reset():
-			if self.datafile['lives'] != 0: self.modified = True
-			self.datafile['lives'] = 0
-			if self.datafile['randomize']: self.modified = True
-			self.datafile['randomize'] = False
-			if not self.datafile['showcount']: self.modified = True
-			self.datafile['showcount'] = True
-			if self.datafile['wrongmsg'] != []: self.modified = True
-			self.datafile['wrongmsg'] = []
-			if self.datafile['fail'] != '': self.modified = True
-			self.datafile['fail'] = ''
-			if self.datafile['finish'] != '': self.modified = True
-			self.datafile['finish'] = ''
-			self.refresh()
-			self.set_title()
-			self.quiz_conf()
-
-		def back(): self.refresh(True)
-
+	def menu(self):
 		self.refresh()
 		self.draw_label('Quiz settings')
-		tk.Button(text = 'Back', command = back).pack(side = 'bottom', anchor = 's')
-		tk.Button(text = 'Reset to defaults', command = reset).pack(side = 'bottom', anchor = 's')
-		tk.Button(text = 'Apply', command = save).pack(side = 'bottom', anchor = 's')
+		tk.Button(text = 'Back', command = self.back).pack(side = 'bottom', anchor = 's')
+		tk.Button(text = 'Reset to defaults', command = self.reset).pack(side = 'bottom', anchor = 's')
+		tk.Button(text = 'Apply', command = self.save).pack(side = 'bottom', anchor = 's')
 
 		life_frame = tk.Frame()
 		self.draw_label(f'Lives (0 = disabled)', master = life_frame, side = 'left')
-		life_entry = tk.Entry(life_frame, width = 10, justify = 'right')
-		life_entry.insert(0, str(self.datafile['lives']))
-		life_entry.pack(side = 'right')
+		self.life_entry = tk.Entry(life_frame, width = 10, justify = 'right')
+		self.life_entry.insert(0, str(self.datafile['lives']))
+		self.life_entry.pack(side = 'right')
 		life_frame.pack(fill = 'x')
 
 		rand_frame = tk.Frame()
 		self.draw_label(f'Randomize question order', master = rand_frame, side = 'left')
-		rand_value = tk.BooleanVar()
-		rand_value.set(self.datafile['randomize'])
-		rand_checkbox = tk.Checkbutton(rand_frame, variable = rand_value)
+		self.rand_value = tk.BooleanVar()
+		self.rand_value.set(self.datafile['randomize'])
+		rand_checkbox = tk.Checkbutton(rand_frame, variable = self.rand_value)
 		rand_checkbox.pack(side = 'right')
 		rand_frame.pack(fill = 'x')
 
 		showcount_frame = tk.Frame()
 		self.draw_label(f'Show question count', master = showcount_frame, side = 'left')
-		showcount_value = tk.BooleanVar()
-		showcount_value.set(self.datafile['showcount'])
-		showcount_checkbox = tk.Checkbutton(showcount_frame, variable = showcount_value)
+		self.showcount_value = tk.BooleanVar()
+		self.showcount_value.set(self.datafile['showcount'])
+		showcount_checkbox = tk.Checkbutton(showcount_frame, variable = self.showcount_value)
 		showcount_checkbox.pack(side = 'right')
 		showcount_frame.pack(fill = 'x')
 
-	"""----------- END MENUS ---------"""
+		wrongmsg_frame = tk.Frame()
+		self.draw_label(f'Global wrong answer comments', master = wrongmsg_frame, side = 'left')
+		tk.Button(wrongmsg_frame, text = 'Edit').pack(side = 'right')
+		if len(self.datafile['wrongmsg']) == 0: self.draw_label('None  ', master = wrongmsg_frame, side = 'right')
+		else: self.draw_label(f'{len(self.datafile["wrongmsg"])} comment{"s" if len(self.datafile["wrongmsg"]) > 1 else ""}  ', master = wrongmsg_frame, side = 'right')
+		wrongmsg_frame.pack(fill = 'x')
 
-class JSONHandler(object):
+		fail_frame = tk.Frame()
+		self.draw_label(f'Game over comment', master = fail_frame, side = 'left')
+		tk.Button(fail_frame, text = 'Edit', command = self.fail_edit).pack(side = 'right')
+		fail_frame.pack(fill = 'x')
+
+		win_frame = tk.Frame()
+		self.draw_label(f'Quiz completion comment', master = win_frame, side = 'left')
+		tk.Button(win_frame, text = 'Edit', command = self.finish_edit).pack(side = 'right')
+		win_frame.pack(fill = 'x')
+
+	def fail_edit(self):
+		def save():
+			text = entry.get('1.0', 'end-1c')
+			if text != self.fail_text: self.fail_text = text
+			self.menu()
+
+		self.refresh()
+		self.draw_label('Type your quiz game over comment.')
+		tk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
+
+		scroll = tk.Scrollbar(orient = 'vertical')
+		entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set)
+		entry.insert('end', self.fail_text)
+		scroll.config(command = entry.yview)
+		scroll.pack(side = 'right', fill = 'y')
+		entry.pack(side = 'left')
+
+	def finish_edit(self):
+		def save():
+			text = entry.get('1.0', 'end-1c')
+			if text != self.finish_text: self.finish_text = text
+			self.menu()
+
+		self.refresh()
+		self.draw_label('Type your quiz completion comment.')
+		tk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
+
+		scroll = tk.Scrollbar(orient = 'vertical')
+		entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set)
+		entry.insert('end', self.finish_text)
+		scroll.config(command = entry.yview)
+		scroll.pack(side = 'right', fill = 'y')
+		entry.pack(side = 'left')
+
+	def save(self):
+		lives_text = self.life_entry.get()
+		try:
+			if int(lives_text) != self.datafile['lives']:
+				if int(lives_text) < 0: tk.messagebox.showerror('Error', 'Life count cannot be negative!')
+				else:
+					self.datafile['lives'] = int(lives_text)
+					self.modified = True
+		except ValueError:
+			if lives_text == '': tk.messagebox.showerror('Error', 'Life count cannot be blank!')
+			else: tk.messagebox.showerror('Error', 'Life count must only contain an integer!')
+		randval = self.rand_value.get()
+		if randval != self.datafile['randomize']:
+			self.datafile['randomize'] = randval
+			self.modified = True
+
+		scval = self.showcount_value.get()
+		if scval != self.datafile['showcount']:
+			self.datafile['showcount'] = scval
+			self.modified = True
+
+		if self.wrongmsg_list != self.datafile['wrongmsg']: self.datafile['wrongmsg'] = self.wrongmsg_list
+		if self.fail_text != self.datafile['fail']: self.datafile['fail'] = self.fail_text
+		if self.finish_text != self.datafile['finish']: self.datafile['finish'] = self.finish_text
+		
+		self.end()
+
+	def reset():
+		if self.datafile['lives'] != 0: self.modified = True
+		if self.datafile['randomize']: self.modified = True
+		if not self.datafile['showcount']: self.modified = True
+		if self.datafile['wrongmsg'] != []: self.modified = True
+		if self.datafile['fail'] != '': self.modified = True
+		if self.datafile['finish'] != '': self.modified = True
+
+		self.datafile['lives'] = 0
+		self.datafile['randomize'] = False
+		self.datafile['showcount'] = True
+		self.datafile['wrongmsg'] = []
+		self.datafile['fail'] = ''
+		self.datafile['finish'] = ''
+		self.menu()
+
+	def back(self):
+		modified = False
+
+		lives_text = self.life_entry.get()
+		try:
+			if int(lives_text) != self.datafile['lives']: modified = True
+		except ValueError: modified = True
+
+		randval = self.rand_value.get()
+		if randval != self.datafile['randomize']: modified = True
+
+		scval = self.showcount_value.get()
+		if scval != self.datafile['showcount']: modified = True
+
+		if self.wrongmsg_list != self.datafile['wrongmsg']: modified = True
+		if self.fail_text != self.datafile['fail']: modified = True
+		if self.finish_text != self.datafile['finish']: modified = True
+
+		if modified:
+			if tk.messagebox.askyesno('Abandon changes?', 'Your changes won\'t be saved. Abandon these changes?', icon = 'warning'): self.end()
+		else: self.end()
+
+	def end(self):
+		if self.datafile['lives'] == 0: del self.datafile['lives']
+		if not self.datafile['randomize']: del self.datafile['randomize']
+		if self.datafile['showcount']: del self.datafile['showcount']
+		if self.datafile['wrongmsg'] == []: del self.datafile['wrongmsg']
+		if self.datafile['fail'] == '': del self.datafile['fail']
+		if self.datafile['finish'] == '': del self.datafile['finish']
+
+		self.gui.datafile = self.datafile
+		self.gui.modified = self.modified
+		self.refresh(True)
+
+class JSONHandler():
 	def __init__(self, gui):
 		self.datafile_new = {'title': 'My Quiz', 'questions': [{'question': 'Question', 'a': 'Answer A', 'b': 'Answer B', 'c': 'Answer C', 'd': 'Answer D', 'correct': 'a'}]}
 		self.new_quiz()
