@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import json
 import traceback
@@ -16,7 +17,7 @@ def report_error(self, exc, val, tb):
 
 tk.Tk.report_callback_exception = report_error
 
-version = 'Beta 1.0.1'
+version = 'Beta 1.0.2'
 about_msg = f'''\
 QuizProg-GUI - {version}
 Project page: https://github.com/gamingwithevets/quizprog-gui
@@ -59,7 +60,7 @@ class GUI():
 		self.font_name = tk_font['family']
 		self.font_size = tk_font['size']
 
-		self.message = ('Welcome to QuizProg-GUI! Any messages will appear here.', False)
+		self.message = ('Welcome to QuizProg-GUI! Any save-related messages will appear here.', False)
 		self.datafile = {'title': 'My Quiz', 'questions': [{'question': 'Question', 'a': 'Answer A', 'b': 'Answer B', 'c': 'Answer C', 'd': 'Answer D', 'correct': 'a'}]}
 		self.datafile_mode = 'json'
 
@@ -95,8 +96,8 @@ class GUI():
 		sys.exit()
 
 	def set_title(self):
-		if self.modified: self.window.title(f'QuizProg-GUI - {self.datafile["title"]}*')
-		else: self.window.title(f'QuizProg-GUI - {self.datafile["title"]}')
+		if self.modified: self.window.title(f'QuizProg-GUI - {self.datafile["title"]}{f" - {self.savepath}" if self.savepath else ""}*')
+		else: self.window.title(f'QuizProg-GUI - {self.datafile["title"]}{f" - {self.savepath}" if self.savepath else ""}')
 
 	def init_window(self):
 		self.window.geometry(f'{self.display_w}x{self.display_h}')
@@ -126,6 +127,10 @@ class GUI():
 		text = tk.Label(master, text = text, font = font, fg = color, bg = bg, width = recwidth, height = recheight, anchor = anc)
 		text.pack(side = side, anchor = anc)
 
+	def draw_blank(self, side = 'top', anchor = 'center', recwidth = None, recheight = None, master = None):
+		if master == None: master = self.window
+		self.draw_label('', side = side, anchor = anchor, recwidth = recwidth, recheight = recheight, master = master)
+
 	def prompt_save_changes(self):
 		if self.modified:
 			prompt = tk.messagebox.askyesnocancel('Unsaved changes!', 'Do you want to save changes to the current quiz?')
@@ -152,7 +157,8 @@ class GUI():
 		if ok:
 			self.savepath = self.jsonhandler.savepath
 			if os.path.splitext(self.savepath)[1].casefold() == '.json': self.datafile_mode = 'json'
-			else: self.datafile_mode = 'qpg'
+			#else: self.datafile_mode = 'qpg'
+			else: self.datafile_mode = 'json'
 			self.datafile = self.jsonhandler.datafile
 			self.modified = False		
 		self.message = self.jsonhandler.message
@@ -229,17 +235,24 @@ class GUI():
 		self.draw_label('You are editing:')
 		try: self.draw_label(self.datafile['title'], font = (f'{self.font_name}', f'{self.font_size}', 'bold'))
 		except Exception: self.draw_label(self.datafile['title'])
-		self.draw_label(self.datafile['description'] if self.jsonhandler.check_element('description') else '(no description provided)')
+		self.draw_label(f'Quiz format: {self.datafile_mode.upper()}')
 		tk.Button(text = 'Quiz settings', command = self.quiz_conf).pack(side = 'bottom')
 		tk.Button(text = 'Edit quiz questions').pack(side = 'bottom')
-		self.draw_label('', side = 'bottom')
+		self.draw_blank(side = 'bottom')
 		tk.Button(text = 'Edit quiz description', command = self.quiz_desc).pack(side = 'bottom')
 		tk.Button(text = 'Rename quiz', command = self.quiz_name).pack(side = 'bottom')
 
 		self.window.mainloop()
 
+	def format_text(self, text):
+		if len(text) > 0:
+			text = re.sub(r'\n+', '\n', text)
+			if text[-1] == '\n': text = text[:-1]
+
+		return text
+
 	def quiz_name(self):
-		def save(event):
+		def save(event = 'blah'):
 			text = entry.get()
 			if text:
 				if text != self.datafile['title']:
@@ -248,8 +261,13 @@ class GUI():
 				self.refresh(True)
 			else: tk.messagebox.showerror('Error', 'Quiz name cannot be blank!')
 
+		def discard():
+			if tk.messagebox.askyesno('Discard', 'Discard changes?'): self.menu()
+
 		self.refresh()
-		self.draw_label('Type your quiz name and press Enter.')
+		self.draw_label('Type your quiz name.')
+		tk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
+		tk.Button(text = 'Discard', command = discard).pack(side = 'bottom', anchor = 's')
 		
 		scroll = tk.Scrollbar(orient = 'horizontal')
 		entry = tk.Entry(width = self.display_w, xscrollcommand = scroll.set)
@@ -264,9 +282,9 @@ class GUI():
 		if not self.jsonhandler.check_element('description'): self.datafile['description'] = ''
 
 		def save():
-			text = entry.get('1.0', 'end-1c')
+			text = self.format_text(entry.get('1.0', 'end-1c'))
 			if text != self.datafile['description']:
-				self.datafile['description'] = text
+				self.datafile['description'] = re.sub(r'\n+', '\n', text)
 				self.modified = True
 			if self.datafile['description'] == '': del self.datafile['description']
 			self.refresh(True)
@@ -276,10 +294,11 @@ class GUI():
 		tk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
 
 		scroll = tk.Scrollbar(orient = 'vertical')
-		entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set)
+		entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set, wrap = 'word')
 		entry.insert('end', self.datafile['description'])
 		scroll.config(command = entry.yview)
 		scroll.pack(side = 'right', fill = 'y')
+		entry.focus()
 		entry.pack(side = 'left')
 
 	def quiz_conf(self): self.quizconf.main()
@@ -293,8 +312,10 @@ class QuizConf():
 		self.display_w = self.gui.display_w
 		self.jsonhandler = self.gui.jsonhandler
 		self.refresh = self.gui.refresh
-		self.modified = self.gui.modified
 		self.draw_label = self.gui.draw_label
+		self.format_text = self.gui.format_text
+
+		self.wrongmsg_editor = WrongMsg_Editor(self.gui, self)
 
 	def main(self):
 		self.datafile = self.gui.datafile
@@ -314,20 +335,21 @@ class QuizConf():
 
 	def menu(self):
 		self.refresh()
-		self.draw_label('Quiz settings')
+		self.draw_label('Quiz settings', font = (f'{self.gui.font_name}', f'{self.gui.font_size}', 'bold'))
 		tk.Button(text = 'Back', command = self.back).pack(side = 'bottom', anchor = 's')
 		tk.Button(text = 'Reset to defaults', command = self.reset).pack(side = 'bottom', anchor = 's')
 		tk.Button(text = 'Apply', command = self.save).pack(side = 'bottom', anchor = 's')
+		self.draw_label('* Click Apply to save changes to this setting', side = 'bottom')
 
 		life_frame = tk.Frame()
-		self.draw_label(f'Lives (0 = disabled)', master = life_frame, side = 'left')
+		self.draw_label(f'Lives (0 = disabled)*', master = life_frame, side = 'left')
 		self.life_entry = tk.Entry(life_frame, width = 10, justify = 'right')
 		self.life_entry.insert(0, str(self.datafile['lives']))
 		self.life_entry.pack(side = 'right')
 		life_frame.pack(fill = 'x')
 
 		rand_frame = tk.Frame()
-		self.draw_label(f'Randomize question order', master = rand_frame, side = 'left')
+		self.draw_label(f'Randomize question order*', master = rand_frame, side = 'left')
 		self.rand_value = tk.BooleanVar()
 		self.rand_value.set(self.datafile['randomize'])
 		rand_checkbox = tk.Checkbutton(rand_frame, variable = self.rand_value)
@@ -335,7 +357,7 @@ class QuizConf():
 		rand_frame.pack(fill = 'x')
 
 		showcount_frame = tk.Frame()
-		self.draw_label(f'Show question count', master = showcount_frame, side = 'left')
+		self.draw_label(f'Show question count*', master = showcount_frame, side = 'left')
 		self.showcount_value = tk.BooleanVar()
 		self.showcount_value.set(self.datafile['showcount'])
 		showcount_checkbox = tk.Checkbutton(showcount_frame, variable = self.showcount_value)
@@ -344,13 +366,13 @@ class QuizConf():
 
 		wrongmsg_frame = tk.Frame()
 		self.draw_label(f'Global wrong answer comments', master = wrongmsg_frame, side = 'left')
-		tk.Button(wrongmsg_frame, text = 'Edit').pack(side = 'right')
+		tk.Button(wrongmsg_frame, text = 'Edit', command = self.wrongmsg_editor.main).pack(side = 'right')
 		if len(self.datafile['wrongmsg']) == 0: self.draw_label('None  ', master = wrongmsg_frame, side = 'right')
 		else: self.draw_label(f'{len(self.datafile["wrongmsg"])} comment{"s" if len(self.datafile["wrongmsg"]) > 1 else ""}  ', master = wrongmsg_frame, side = 'right')
 		wrongmsg_frame.pack(fill = 'x')
 
 		fail_frame = tk.Frame()
-		self.draw_label(f'Game over comment', master = fail_frame, side = 'left')
+		self.draw_label(f'Game over comment (requires lives to be enabled)', master = fail_frame, side = 'left')
 		tk.Button(fail_frame, text = 'Edit', command = self.fail_edit).pack(side = 'right')
 		fail_frame.pack(fill = 'x')
 
@@ -361,8 +383,10 @@ class QuizConf():
 
 	def fail_edit(self):
 		def save():
-			text = entry.get('1.0', 'end-1c')
-			if text != self.fail_text: self.fail_text = text
+			text = self.format_text(entry.get('1.0', 'end-1c'))
+			if text != self.fail_text:
+				self.fail_text = text
+				self.gui.modified = True
 			self.menu()
 
 		self.refresh()
@@ -378,8 +402,10 @@ class QuizConf():
 
 	def finish_edit(self):
 		def save():
-			text = entry.get('1.0', 'end-1c')
-			if text != self.finish_text: self.finish_text = text
+			text = self.format_text(entry.get('1.0', 'end-1c'))
+			if text != self.finish_text:
+				self.finish_text = text
+				self.gui.modified = True
 			self.menu()
 
 		self.refresh()
@@ -397,36 +423,32 @@ class QuizConf():
 		lives_text = self.life_entry.get()
 		try:
 			if int(lives_text) != self.datafile['lives']:
-				if int(lives_text) < 0: tk.messagebox.showerror('Error', 'Life count cannot be negative!')
+				if int(lives_text) < 0: tk.messagebox.showerror('Error', 'Life count cannot be negative!'); return
 				else:
 					self.datafile['lives'] = int(lives_text)
-					self.modified = True
+					self.gui.modified = True
 		except ValueError:
-			if lives_text == '': tk.messagebox.showerror('Error', 'Life count cannot be blank!')
-			else: tk.messagebox.showerror('Error', 'Life count must only contain an integer!')
+			if lives_text == '': tk.messagebox.showerror('Error', 'Life count cannot be blank!'); return
+			else: tk.messagebox.showerror('Error', 'Life count must only contain an integer!'); return
 		randval = self.rand_value.get()
 		if randval != self.datafile['randomize']:
 			self.datafile['randomize'] = randval
-			self.modified = True
+			self.gui.modified = True
 
 		scval = self.showcount_value.get()
 		if scval != self.datafile['showcount']:
 			self.datafile['showcount'] = scval
-			self.modified = True
+			self.gui.modified = True
 
-		if self.wrongmsg_list != self.datafile['wrongmsg']: self.datafile['wrongmsg'] = self.wrongmsg_list
-		if self.fail_text != self.datafile['fail']: self.datafile['fail'] = self.fail_text
-		if self.finish_text != self.datafile['finish']: self.datafile['finish'] = self.finish_text
-		
 		self.end()
 
-	def reset():
-		if self.datafile['lives'] != 0: self.modified = True
-		if self.datafile['randomize']: self.modified = True
-		if not self.datafile['showcount']: self.modified = True
-		if self.datafile['wrongmsg'] != []: self.modified = True
-		if self.datafile['fail'] != '': self.modified = True
-		if self.datafile['finish'] != '': self.modified = True
+	def reset(self):
+		if self.datafile['lives'] != 0: self.gui.modified = True
+		if self.datafile['randomize']: self.gui.modified = True
+		if not self.datafile['showcount']: self.gui.modified = True
+		if self.datafile['wrongmsg'] != []: self.gui.modified = True
+		if self.datafile['fail'] != '': self.gui.modified = True
+		if self.datafile['finish'] != '': self.gui.modified = True
 
 		self.datafile['lives'] = 0
 		self.datafile['randomize'] = False
@@ -467,8 +489,140 @@ class QuizConf():
 		if self.datafile['finish'] == '': del self.datafile['finish']
 
 		self.gui.datafile = self.datafile
-		self.gui.modified = self.modified
 		self.refresh(True)
+
+class WrongMsg_Editor():
+	def __init__(self, gui, quizconf):
+		self.gui = gui
+		self.quizconf = quizconf
+
+		self.refresh = self.gui.refresh
+		self.display_w = self.gui.display_w
+		self.draw_label = self.gui.draw_label
+		self.draw_blank = self.gui.draw_blank
+		self.format_text = self.gui.format_text
+
+	def main(self):
+		self.wrongmsg = self.quizconf.wrongmsg_list
+
+		self.index = 0
+
+		self.menu()
+
+	def navigation_prev(self): self.index -= 1; self.menu()
+	def navigation_next(self): self.index += 1; self.menu()
+
+	def menu(self):
+		self.refresh()
+		self.draw_label('Global wrong answer comments', font = (f'{self.gui.font_name}', f'{self.gui.font_size}', 'bold'))
+		tk.Button(text = 'Back', command = self.end).pack(side = 'bottom')
+		self.draw_blank(side = 'bottom')
+
+		if len(self.wrongmsg) == 0:
+			self.draw_label('No global wrong answer comments!')
+			tk.Button(text = 'Create new comment', command = self.new).pack(side = 'bottom')
+		else:
+			self.draw_label(f'{self.index + 1} / {len(self.wrongmsg)}')
+			tk.Button(text = 'Delete comment', command = self.delete).pack(side = 'bottom')
+			tk.Button(text = 'Edit comment', command = self.edit).pack(side = 'bottom')
+			tk.Button(text = 'Create new comment', command = self.new).pack(side = 'bottom')
+			self.draw_blank(side = 'bottom')
+			nav_frame = tk.Frame()
+			prev_bt = tk.Button(nav_frame, text = 'Previous', command = self.navigation_prev)
+			next_bt = tk.Button(nav_frame, text = 'Next', command = self.navigation_next)
+			if len(self.wrongmsg) > 1:
+				if self.index == 0: next_bt.pack(side = 'right')
+				elif self.index == len(self.wrongmsg) - 1: prev_bt.pack(side = 'left')
+				else: prev_bt.pack(side = 'left'); next_bt.pack(side = 'right')
+			nav_frame.pack(side = 'bottom', fill = 'x')
+
+			scroll = tk.Scrollbar(orient = 'vertical')
+			text = tk.Text(width = self.display_w, yscrollcommand = scroll.set, wrap = 'word')
+			text.insert('end', self.wrongmsg[self.index])
+			text.bind('<Key>', self.romsg)
+			scroll.config(command = text.yview)
+			scroll.pack(side = 'right', fill = 'y')
+			text.pack(side = 'left')
+
+	def romsg(self, event):
+		tk.messagebox.showwarning('Text read-only', 'Sorry, this text is READ-ONLY. To edit it, click "Edit comment" instead.\nThank you!')
+		return 'break'
+
+	def new(self):
+		def save():
+			text = self.format_text(entry.get('1.0', 'end-1c'))
+			if len(self.wrongmsg) > 0:
+				for i in range(len(self.wrongmsg)):
+					if text == self.wrongmsg[i]:
+						tk.messagebox.showerror('Error', f'Duplicate global wrong answer comment detected!\nDuplicate of comment w/ index {i + 1} / {len(self.wrongmsg)}')
+						return
+			if text != '':
+				self.wrongmsg.append(text)
+				self.gui.modified = True
+				self.index = len(self.wrongmsg) - 1
+			self.menu()
+
+		def discard():
+			if tk.messagebox.askyesno('Discard', 'Discard this comment?'): self.menu()
+
+		self.refresh()
+		self.draw_label('Type your global wrong answer comment.')
+		tk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
+		tk.Button(text = 'Discard', command = discard).pack(side = 'bottom', anchor = 's')
+
+		scroll = tk.Scrollbar(orient = 'vertical')
+		entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set, wrap = 'word')
+		scroll.config(command = entry.yview)
+		scroll.pack(side = 'right', fill = 'y')
+		entry.focus()
+		entry.pack(side = 'left')
+
+	def edit(self):
+		def save():
+			text = self.format_text(entry.get('1.0', 'end-1c'))
+			if len(self.wrongmsg) > 0:
+				for i in range(len(self.wrongmsg)):
+					if i != self.index and text == self.wrongmsg[i]:
+						tk.messagebox.showerror('Error', f'Duplicate global wrong answer comment detected!\nDuplicate of comment w/ index {i + 1} / {len(self.wrongmsg)}')
+						return
+			if text != '':
+				self.wrongmsg[self.index] = text
+				self.gui.modified = True
+				self.index = len(self.wrongmsg) - 1
+			self.menu()
+
+		def discard():
+			text = self.format_text(entry.get('1.0', 'end-1c'))
+			if text != self.wrongmsg[self.index]:
+				if tk.messagebox.askyesno('Discard', 'Discard changes to this comment?'): self.menu()
+			else: self.menu()
+
+		self.refresh()
+		self.draw_label('Type your global wrong answer comment.')
+		tk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
+		tk.Button(text = 'Discard', command = discard).pack(side = 'bottom', anchor = 's')
+
+		scroll = tk.Scrollbar(orient = 'vertical')
+		entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set, wrap = 'word')
+		entry.insert('end', self.wrongmsg[self.index])
+		scroll.config(command = entry.yview)
+		scroll.pack(side = 'right', fill = 'y')
+		entry.focus()
+		entry.pack(side = 'left')
+
+	def delete(self):
+		if tk.messagebox.askyesno('Delete this comment?', 'Are you sure you want to delete this comment?'):
+			del self.wrongmsg[self.index]
+			if len(self.wrongmsg) > 0: self.index -= 1
+			else: self.index = 0
+			self.modified = True
+			self.refresh()
+			self.menu()
+
+
+	def end(self):
+		self.quizconf.wrongmsg_list = self.wrongmsg
+		self.quizconf.menu()
 
 class JSONHandler():
 	def __init__(self, gui):
@@ -504,7 +658,8 @@ class JSONHandler():
 		self.savepath_tmp = tk.filedialog.askopenfilename(initialdir = os.path.dirname(self.savepath) if self.savepath else os.getcwd(), filetypes = [('QuizProg-GUI Quiz Projects', '*.qpg'), ('QuizProg Quiz Projects', '*.json'), ('All Files', '*.*')], defaultextension = '.qpg')
 		if self.savepath_tmp:
 			if os.path.splitext(self.savepath_tmp)[1].casefold() == '.json':
-				if not tk.messagebox.askyesno('Note for JSON files', 'The file you are trying to open is a (console) QuizProg quiz project. However, these quiz projects are limited to the features in (console) QuizProg.\nRight now you are not required to save this file as a QuizProg-GUI quiz project until you want to use new features present in QuizProg-GUI.\nDo you want to continue?'): return False
+				#if not tk.messagebox.askyesno('Note for JSON files', 'The file you are trying to open is a (console) QuizProg quiz project. However, these quiz projects are limited to the features in (console) QuizProg.\nRight now you are not required to save this file as a QuizProg-GUI quiz project until you want to use new features present in QuizProg-GUI.\nDo you want to continue?'): return False
+				tk.messagebox.showinfo('Note for JSON files', 'The file you are trying to open is a (console) QuizProg quiz project. However, these quiz projects are limited to the features in (console) QuizProg.\nHowever, the new features of the QPG format aren\'t implemented yet, so I\'ll let you open this without any problems.\n\n...for now.')
 			old_path = self.savepath
 			self.savepath = self.savepath_tmp
 			if os.name == 'nt': self.savepath = self.savepath.replace('/', '\\')
