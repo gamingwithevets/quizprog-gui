@@ -1,15 +1,14 @@
-**QuizProg-GUI** - a GUI version of QuizProg.   
-[Console version](../../../quizprog)
+**QuizProg-GUI** is a graphical user interface version of [QuizProg](../../../quizprog).
 
 Note: This version is currently in the beta stage. **Bugs and glitches may happen** when you use QuizProg-GUI.
 
 # What's changed?
-Here is the list of new features in QuizProg-GUI. *(as of Beta 1.0.2)*
-- A *real* graphical user interface (c'mon, average users probably won't like the look of the "black box")
+Here is the list of new features in QuizProg-GUI. *(as of version 0.1.0)*
+- A full graphical user interface with Tkinter
 - Easier to use
 
 # Editable features
-*(as of Beta 1.0.2)*
+*(as of version 0.1.0)*
 - Basic info
 - - Name
 - - Description
