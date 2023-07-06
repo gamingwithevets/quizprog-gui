@@ -1,6 +1,6 @@
 **QuizProg-GUI** is a graphical user interface version of [QuizProg](../../../quizprog).
 
-Note: This version is currently in the beta stage. **Bugs and glitches may happen** when you use QuizProg-GUI.
+Note: QuizProg-GUI is currently in the pre-release stage. **Bugs and glitches may happen** when you use QuizProg-GUI.
 
 # What's changed?
 Here is the list of new features in QuizProg-GUI. *(as of version 0.1.0)*
