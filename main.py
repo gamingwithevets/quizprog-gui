@@ -1,14 +1,13 @@
 import sys
 
-python_requirement = '3.7.0'
+python_requirement = (3, 6, 0)
 
 import platform
-if platform.python_version() < python_requirement:
-	if platform.python_version() < '3.10.0':
-		print('Oops! Your Python version is too old.\n')
-		print(f'Requirement: Python {python_requirement}+\nYou have   : Python {platform.python_version()}')
-		print('\nGet a newer version!')
-		sys.exit()
+if sys.version_info < python_requirement:
+	print('Oops! Your Python version is too old.\n')
+	print(f'Requirement: Python {".".join(map(str, python_requirement))}\nYou have   : Python {platform.python_version()}')
+	print('\nGet a newer version!')
+	sys.exit()
 
 try: import tkinter as tk
 except ImportError:
@@ -25,15 +24,17 @@ import os
 import traceback
 
 import tkinter.messagebox
-try:
-	from gui import GUI
-
-	g = GUI(tk.Tk())
-
-except ImportError: tk.messagebox.showerror('Hmmm?', f'Whoops! The script "gui.py" is required.\nCan you make sure the script is in "{os.getcwd()}"?')
-except Exception:
-	try: GUI.window.quit()
-	except Exception: pass
-	print(f'Whoops! QuizProg-GUI has suffered a very fatal error.\n\n{traceback.format_exc()}\nIf this error persists, please report it here:\nhttps://github.com/gamingwithevets/quizprog-gui/issues')
-	tk.messagebox.showerror('Whoops!', f'QuizProg-GUI has suffered a very fatal error.\n\n{traceback.format_exc()}\nIf this error persists, please report it here:\nhttps://github.com/gamingwithevets/quizprog-gui/issues')
+try: import gui
+except ImportError:
+	err_text = f'Whoops! The script "gui.py" is required.\nCan you make sure the script is in "{gui.temp_path}"?\n\n{traceback.format_exc()}\nIf this problem persists, please report it here:\nhttps://github.com/{gui.username}/{gui.repo_name}/issues'
+	print(err_text)
+	tk.messagebox.showerror('Hmmm?', err_text)
 	sys.exit()
+
+g = gui.GUI(tk.Tk())
+gui.g = g
+while True:
+	try: g.start_main()
+	except Exception:
+		tk.messagebox.showerror('Error', gui.report_error(*sys.exc_info(), True))
+		sys.exit()
