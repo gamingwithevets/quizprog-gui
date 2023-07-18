@@ -28,9 +28,9 @@ name = 'QuizProg-GUI'
 username = 'gamingwithevets'
 repo_name = 'quizprog-gui'
 
-version = '0.1.0'
-internal_version = 'v0.1.0'
-prerelease = True
+version = '1.0.0'
+internal_version = 'v1.0.0'
+prerelease = False
 
 license = 'MIT'
 
@@ -56,10 +56,10 @@ def report_error(e, val, tb, fatal = False):
 tk.Tk.report_callback_exception = report_error
 
 class GUI:
-	def __init__(self, window):
+	def __init__(self):
 		self.version = version
 
-		self.window = window
+		self.window = tk.Tk()
 
 		self.temp_path = temp_path
 
@@ -76,10 +76,9 @@ class GUI:
 		self.italic_font.config(slant = 'italic')
 
 		self.init_window()
-		self.init_protocols()
 
 		# quizprog-gui settings
-		self.message = 'Welcome to QuizProg-GUI! Any messages will appear here.'
+		self.message = 'Loaded template quiz.'
 		self.message_force = None
 		self.datafile = {'title': 'My Quiz', 'questions': [{'question': 'Question', 'a': 'Answer A', 'b': 'Answer B', 'c': 'Answer C', 'd': 'Answer D', 'correct': 'a'}]}
 		self.datafile_mode = 'json'
@@ -105,8 +104,12 @@ class GUI:
 		self.ini = configparser.ConfigParser()
 		self.parse_settings()
 
+		self.input_string_text = ''
+		self.input_string_skip = False
+
 		self.jsonhandler = JSONHandler(self)
 		self.quizconf = QuizConf(self)
+		self.question_viewer = QuestionViewer(self)
 		self.updater_gui = UpdaterGUI(self)
 
 		self.unsupported_tcl = False
@@ -114,20 +117,23 @@ class GUI:
 			if tk.messagebox.askyesno('Warning', f'It looks like you are running Python {platform.python_version()}, which has a version of Tcl/Tk that doesn\'t support some Unicode characters.\n\nDo you want to continue?', icon = 'warning'): self.unsupported_tcl = True
 			else: self.quit()
 
-	def set_message_force(self, msg): self.message_force = msg
+	def set_message_force(self, msg):
+		self.message_force = msg
+		self.config_msg()
 
 	def start_main(self):
 		if not self.updates_checked:
 			if self.auto_check_updates.get(): threading.Thread(target = self.auto_update).start()
 			else: self.updates_checked = True
-		self.main()
+		self.window.after(0, self.main if (not self.savepath or self.savepath.isspace()) else self.open_file_startup)
+		self.window.mainloop()
 
 	def auto_update(self):
 		self.update_thread = ThreadWithResult(target = self.updater_gui.updater.check_updates, args = (True,))
 		self.update_thread.start()
 		i = 0
 		j = 0
-		mult = 5000
+		mult = 2500
 		while self.update_thread.is_alive():
 			if i == mult*4:
 				i += 1
@@ -187,10 +193,7 @@ class GUI:
 	def refresh(self, load_func = False, custom_func = None, menubar = True):
 		for w in self.window.winfo_children(): w.destroy()
 		
-		self.window.unbind('<Control-n>')
-		self.window.unbind('<Control-o>')
-		self.window.unbind('<Control-s>')
-		self.window.unbind('<Control-Shift-S>')
+		self.rebind()
 		if menubar: self.menubar()
 		self.set_title()
 
@@ -205,7 +208,7 @@ class GUI:
 
 		if not any([
 			self.updater_win_open,
-			]): os._exit(0)
+			]): sys.exit()
 
 	def set_title(self):
 		try:
@@ -235,9 +238,9 @@ class GUI:
 	def init_window(self):
 		self.window.geometry(f'{self.display_w}x{self.display_h}')
 		self.window.resizable(False, False)
-		self.window.bind('<F12>', self.version_details)
-		self.window.bind('<1>', self.main_focus)
+		self.rebind()
 		self.window.option_add('*tearOff', False)
+		self.window.protocol('WM_DELETE_WINDOW', self.quit)
 		
 		self.disable_all_widgets()
 
@@ -250,8 +253,10 @@ class GUI:
 			tk.messagebox.showerror('Hmmm?', err_text)
 			sys.exit()
 
-	def init_protocols(self):
-		self.window.protocol('WM_DELETE_WINDOW', self.quit)
+	def rebind(self):
+		for e in self.window.bind(): self.window.unbind(e)
+		self.window.bind('<F12>', self.version_details)
+		self.window.bind('<1>', self.main_focus)
 
 	def unicode_filter(self, string): return ''.join(['□' if ord(c) > 0xFFFF else c for c in string]) if self.unsupported_tcl else string
 
@@ -259,7 +264,7 @@ class GUI:
 		if self.modified:
 			prompt = tk.messagebox.askyesnocancel('Unsaved changes!', 'Do you want to save changes to the current quiz?', icon = 'warning')
 			if prompt == None: return True
-			elif prompt: self.save_file()
+			elif prompt: return not self.save_file()
 
 	def new_quiz(self):
 		cancel = self.prompt_save_changes()
@@ -278,24 +283,39 @@ class GUI:
 
 		ok = self.jsonhandler.open_file()
 		if ok:
-			self.savepath = self.jsonhandler.savepath
-			if os.path.splitext(self.savepath)[1].casefold() == '.json': self.datafile_mode = 'json'
-			#else: self.datafile_mode = 'qpg'
-			else: self.datafile_mode = 'json'
-			self.datafile = self.jsonhandler.datafile
-			self.modified = False		
-		
+			self.open_file_ex()
+			self.refresh(True)
+
+	def open_file_ex(self):
+		self.savepath = self.jsonhandler.savepath
+		if os.path.splitext(self.savepath)[1].casefold() == '.json': self.datafile_mode = 'json'
+		#else: self.datafile_mode = 'qpg'
+		else: self.datafile_mode = 'json'
+		self.datafile = self.jsonhandler.datafile
+		self.modified = False		
+
+	def open_file_startup(self):
+		self.savepath = os.path.abspath(self.savepath)
+		success, message = self.jsonhandler.check_json(self.savepath)
+		if success:
+			self.message = message
+			self.open_file_ex()
+		else:
+			self.message_force = message
+			self.savepath = self.jsonhandler.savepath = ''
+
 		self.refresh(True)
 
 	def save_file(self):
-		if self.savepath and os.path.exists(self.savepath) and not os.path.isdir(self.savepath):
+		if self.savepath:
 			with open(self.savepath, 'w+') as f: f.write(json.dumps(self.datafile, indent = 4))
 			self.message = 'Quiz saved!'
 			self.modified = False
 			self.config_msg()
+			return True
 		else:
 			self.savepath = ''
-			self.save_file_as()
+			return self.save_file_as()
 
 	def save_file_as(self):
 		ok = self.jsonhandler.save_file(self.datafile_mode == 'json')
@@ -304,15 +324,18 @@ class GUI:
 			self.modified = False
 		
 		self.config_msg()
+		return ok
 
 	def reload(self):
 		if self.modified:
-			confirm = tk.messagebox.askyesno('Reload changes?', 'Are you sure you want to reload this quiz and lose the changes you made in QuizProg-GUI?', icon = 'warning')
-			if not confirm: return
-			else:
-				self.jsonhandler.reload()
-				self.modified = False
-				self.config_msg()
+			confirm = tk.messagebox.askyesno('Reload changes?', 'Are you sure you want to reload this quiz and lose the changes you made in QuizProg-GUI?\n\nThis will take you back to the menu.', icon = 'warning')
+			if confirm and self.savepath:
+					self.jsonhandler.reload()
+					self.modified = False
+					self.message = 'Quiz reloaded.'
+					self.config_msg()
+					self.refresh(True)
+			else: return
 
 	def about_menu(self):
 		nl = '\n' # workaround for prohibition of backslashes in f-string expression
@@ -376,7 +399,7 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		file_menu.add_command(label = 'Save', command = self.save_file, accelerator = 'Ctrl+S')
 		file_menu.add_command(label = 'Save as...', command = self.save_file_as, accelerator = 'Ctrl+Shift+S')
 		file_menu.add_separator()
-		file_menu.add_command(label = 'Compile EXE file', command = self.n_a)
+		file_menu.add_command(label = 'Compile EXE file', state = 'disabled')
 		file_menu.add_separator()
 		file_menu.add_command(label = 'Exit', command = self.quit)
 		menubar.add_cascade(label = 'File', menu = file_menu)
@@ -416,10 +439,11 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		self.window.bind('<Control-Shift-S>', lambda x: self.save_file_as())
 
 	def config_msg(self):
-		if self.message_force: self.msg_label.config(text = self.message_force, background = 'red')
-		elif self.message: self.msg_label.config(text = self.message, background = 'green')
-		else: self.msg_label.config(text = f'QuizProg - GUI edition. Version {version}. © 2023 GamingWithEvets Inc.', background = 'black')
-		self.message = self.message_force = None
+		if self.msg_label.winfo_exists():
+			if self.message_force: self.msg_label.config(text = self.message_force, background = 'red')
+			elif self.message: self.msg_label.config(text = self.message, background = 'green')
+			else: self.msg_label.config(text = f'QuizProg - GUI edition. Version {version}. © 2023 GamingWithEvets Inc.', background = 'black')
+			self.message = self.message_force = None
 
 	def print_msg(self):
 		self.msg_label = ttk.Label(foreground = 'white', anchor = 'center', width = self.display_w)
@@ -442,13 +466,11 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		else: desc = '(no description)'
 		ttk.Label(text = desc, justify = 'center', font = self.italic_font).pack()
 
-		ttk.Button(text = 'Quiz settings', command = self.quiz_conf).pack(side = 'bottom')
-		ttk.Button(text = 'Quiz questions', command = self.n_a).pack(side = 'bottom')
+		ttk.Button(text = 'Quiz settings', command = self.quizconf.main).pack(side = 'bottom')
+		ttk.Button(text = 'Quiz questions', command = self.question_viewer.main).pack(side = 'bottom')
 		ttk.Label().pack(side = 'bottom')
 		ttk.Button(text = 'Edit quiz description', command = self.quiz_desc).pack(side = 'bottom')
 		ttk.Button(text = 'Rename quiz', command = self.quiz_name).pack(side = 'bottom')
-
-		self.window.mainloop()
 
 	def format_text(self, text):
 		if len(text) > 0:
@@ -457,66 +479,81 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 
 		return text
 
-	def quiz_name(self):
-		def save(event = 'blah'):
-			text = entry.get()
-			if text:
-				if text != self.datafile['title']:
-					self.datafile['title'] = text
+	def input_string(self, name, post_func, og = '', allow_blank = True, multiline = True, name2 = None):
+		def save(event = None):
+			if multiline: text = self.format_text(entry.get('1.0', 'end-1c'))
+			else: text = entry.get()
+			if text and not text.isspace():
+				if text != og:
 					self.modified = True
-				self.refresh(True)
-				self.message = 'Quiz name saved!'
-			else: tk.messagebox.showerror('Error', 'Quiz name cannot be blank!')
+					self.input_string_text = text
+				else: self.input_string_skip = True
+				post_func()
+			else:
+				if allow_blank:
+					if text != og:
+						self.modified = True
+						self.input_string_text = text
+					else: self.input_string_skip = True
+					post_func()
+				else: tk.messagebox.showerror('Error', f'{name} cannot be blank!')
 
 		def discard():
-			if tk.messagebox.askyesno('Discard', 'Discard changes?', icon = 'warning'): self.main()
+			if tk.messagebox.askyesno('Discard', 'Discard changes?', icon = 'warning'):
+				self.input_string_skip = True
+				post_func()
+
+		self.input_string_text = og
+		self.input_string_skip = False
 
 		self.refresh(menubar = False)
-		ttk.Label(text = 'Type your quiz name.').pack()
+		if not name2: name2 = name.lower()
+		ttk.Label(text = f'Type your {name2}.').pack()
 		ttk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
 		ttk.Button(text = 'Discard', command = discard).pack(side = 'bottom', anchor = 's')
 		
-		scroll = ttk.Scrollbar(orient = 'horizontal')
-		entry = ttk.Entry(width = self.display_w, xscrollcommand = scroll.set)
-		entry.insert(0, self.datafile['title'])
-		entry.bind('<Return>', save)
-		entry.focus()
-		entry.pack()
-		scroll.config(command = entry.xview)
-		scroll.pack(fill = 'x')
+		if multiline:
+			scroll = ttk.Scrollbar(orient = 'vertical')
+			entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set, wrap = 'word')
+			entry.insert('end', og)
+			scroll.config(command = entry.yview)
+			scroll.pack(side = 'right', fill = 'y')
+			entry.focus()
+			entry.pack(side = 'left')
+		else:
+			scroll = ttk.Scrollbar(orient = 'horizontal')
+			entry = ttk.Entry(width = self.display_w, xscrollcommand = scroll.set)
+			entry.insert(0, og)
+			entry.bind('<Return>', save)
+			entry.focus()
+			entry.pack()
+			scroll.config(command = entry.xview)
+			scroll.pack(fill = 'x')
+
+	def quiz_name(self):
+		def post():
+			self.datafile['title'] = self.input_string_text
+			if not self.input_string_skip: self.message = 'Quiz name saved!'
+			self.main()
+
+		self.input_string('Quiz name', post, self.datafile['title'], False, multiline = False)
 
 	def quiz_desc(self):
 		if not self.jsonhandler.check_element('description'): self.datafile['description'] = ''
+	
+		def post():
+			self.datafile['description'] = self.input_string_text
+			if not self.input_string_skip: self.message = 'Quiz description saved!'
+			self.main()
 
-		def save():
-			text = self.format_text(entry.get('1.0', 'end-1c'))
-			if text != self.datafile['description']:
-				self.datafile['description'] = re.sub(r'\n+', '\n', text)
-				self.modified = True
-				self.message = 'Quiz description saved!'
-			if self.datafile['description'] == '': del self.datafile['description']
-			self.refresh(True)
-
-		self.refresh(menubar = False)
-		ttk.Label(text = 'Type your quiz description.').pack()
-		ttk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
-
-		scroll = ttk.Scrollbar(orient = 'vertical')
-		entry = tk.Text(width = self.display_w, yscrollcommand = scroll.set, wrap = 'word')
-		entry.insert('end', self.datafile['description'])
-		scroll.config(command = entry.yview)
-		scroll.pack(side = 'right', fill = 'y')
-		entry.focus()
-		entry.pack(side = 'left')
-
-	def quiz_conf(self): self.quizconf.main()
+		self.input_string('Quiz description', post, self.datafile['description'])
 
 	"""----------- END MENUS ---------"""
 
 class QuizConf:
 	def __init__(self, gui):
 		self.gui = gui
-		self.wrongmsg_editor = WrongMsg_Editor(self)
+		self.wrongmsg_editor = WrongMsgEditor(self)
 
 		self.is_editing = False
 
@@ -542,7 +579,7 @@ class QuizConf:
 		self.gui.refresh()
 		self.gui.print_msg()
 
-		self.dummy = ttk.Label(text = 'Quiz settings', font = self.gui.bold_font).pack()
+		ttk.Label(text = 'Quiz settings', font = self.gui.bold_font).pack()
 		ttk.Button(text = 'OK', command = self.end).pack(side = 'bottom')
 		ttk.Button(text = 'Reset to defaults', command = self.reset).pack(side = 'bottom')
 
@@ -591,44 +628,20 @@ class QuizConf:
 		self.is_editing = True
 
 	def fail_edit(self):
-		def save():
-			text = self.gui.format_text(entry.get('1.0', 'end-1c'))
-			if text != self.fail_text:
-				self.fail_text = text
-				self.gui.modified = True
-				self.gui.message = 'Game over comment saved!'
+		def post():
+			self.fail_text = self.gui.input_string_text
+			if not self.gui.input_string_skip: self.gui.message = 'Game over comment saved!'
 			self.menu()
 
-		self.gui.refresh(menubar = False)
-		ttk.Label(text = 'Type your quiz game over comment.').pack()
-		ttk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
-
-		scroll = ttk.Scrollbar(orient = 'vertical')
-		entry = tk.Text(width = self.gui.display_w, yscrollcommand = scroll.set)
-		entry.insert('end', self.fail_text)
-		scroll.config(command = entry.yview)
-		scroll.pack(side = 'right', fill = 'y')
-		entry.pack(side = 'left')
+		self.gui.input_string('quiz game over comment', post, self.fail_text)
 
 	def finish_edit(self):
-		def save():
-			text = self.gui.format_text(entry.get('1.0', 'end-1c'))
-			if text != self.finish_text:
-				self.finish_text = text
-				self.gui.modified = True
-				self.gui.message = 'Quiz completion comment saved!'
+		def post():
+			self.finish_text = self.gui.input_string_text
+			if not self.gui.input_string_skip: self.gui.message = 'Completion comment saved!'
 			self.menu()
 
-		self.gui.refresh(menubar = False)
-		ttk.Label(text = 'Type your quiz completion comment.').pack()
-		ttk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
-
-		scroll = ttk.Scrollbar(orient = 'vertical')
-		entry = tk.Text(width = self.gui.display_w, yscrollcommand = scroll.set)
-		entry.insert('end', self.finish_text)
-		scroll.config(command = entry.yview)
-		scroll.pack(side = 'right', fill = 'y')
-		entry.pack(side = 'left')
+		self.gui.input_string('quiz completion comment', post, self.finish_text)
 
 	def check_lives(self, old_input, new_input, validate_type):
 		if validate_type == 'key':
@@ -678,49 +691,60 @@ class QuizConf:
 		self.gui.datafile = self.datafile
 		self.gui.refresh(True)
 
-class WrongMsg_Editor:
+class WrongMsgEditor:
 	def __init__(self, quizconf):
 		self.quizconf = quizconf
 		self.gui = quizconf.gui
 
 	def main(self):
 		self.wrongmsg = self.quizconf.wrongmsg_list
-
 		self.index = 0
 
 		self.menu()
 
-	def navigation_prev(self): self.index -= 1; self.menu()
-	def navigation_next(self): self.index += 1; self.menu()
+	def navigation_prev(self, e = None):
+		if self.index > 0:
+			self.index -= 1
+			self.menu()
+	def navigation_next(self, e = None):
+		if self.index < len(self.wrongmsg) - 1:
+			self.index += 1
+			self.menu()
 
 	def menu(self):
 		self.gui.refresh()
 		self.gui.print_msg()
+
+		self.gui.window.bind('<Left>', self.navigation_prev)
+		self.gui.window.bind('<Right>', self.navigation_next)
+
 		ttk.Label(text = 'Global wrong answer comments', font = self.gui.bold_font).pack()
 		ttk.Button(text = 'Back', command = self.end).pack(side = 'bottom')
 		ttk.Label().pack(side = 'bottom')
 
+		delbutton = ttk.Button(text = 'Delete comment', command = self.delete); delbutton.pack(side = 'bottom')
+		editbutton = ttk.Button(text = 'Edit comment', command = self.edit); editbutton.pack(side = 'bottom')
+		ttk.Button(text = 'Create new comment', command = self.new).pack(side = 'bottom')
 		if len(self.wrongmsg) == 0:
 			ttk.Label(text = 'No global wrong answer comments!').pack()
-			ttk.Button(text = 'Create new comment', command = self.new).pack(side = 'bottom')
+			editbutton.config(state = 'disabled')
+			delbutton.config(state = 'disabled')
 		else:
 			ttk.Label(text = f'{self.index + 1} / {len(self.wrongmsg)}').pack()
-			ttk.Button(text = 'Delete comment', command = self.delete).pack(side = 'bottom')
-			ttk.Button(text = 'Edit comment', command = self.edit).pack(side = 'bottom')
-			ttk.Button(text = 'Create new comment', command = self.new).pack(side = 'bottom')
 			ttk.Label().pack(side = 'bottom')
 			nav_frame = FocusFrame()
-			prev_bt = ttk.Button(nav_frame, text = '<', command = self.navigation_prev)
-			next_bt = ttk.Button(nav_frame, text = '>', command = self.navigation_next)
-			if len(self.wrongmsg) > 1:
-				if self.index == 0: next_bt.pack(side = 'right')
-				elif self.index == len(self.wrongmsg) - 1: prev_bt.pack(side = 'left')
-				else: prev_bt.pack(side = 'left'); next_bt.pack(side = 'right')
 			nav_frame.pack(side = 'bottom', fill = 'x')
+			prev_bt = ttk.Button(nav_frame, text = '< Previous', command = self.navigation_prev)
+			next_bt = ttk.Button(nav_frame, text = 'Next >', command = self.navigation_next)
+			if len(self.wrongmsg) > 1:
+				if self.index == 0: prev_bt.config(state = 'disabled')
+				elif self.index == len(self.wrongmsg) - 1: next_bt.config(state = 'disabled')
+			else: prev_bt.config(state = 'disabled'); next_bt.config(state = 'disabled')
+			prev_bt.pack(side = 'left'); next_bt.pack(side = 'right')
 
 			scroll = ttk.Scrollbar(orient = 'vertical')
 			text = tk.Text(width = self.gui.display_w, yscrollcommand = scroll.set, wrap = 'word')
-			text.insert('end', self.wrongmsg[self.index])
+			text.insert('end', self.wrongmsg[selfi.index])
 			text.bind('<Key>', self.romsg)
 			scroll.config(command = text.yview)
 			scroll.pack(side = 'right', fill = 'y')
@@ -731,68 +755,23 @@ class WrongMsg_Editor:
 		return 'break'
 
 	def new(self):
-		def save():
-			text = self.gui.format_text(entry.get('1.0', 'end-1c'))
-			if len(self.wrongmsg) > 0:
-				for i in range(len(self.wrongmsg)):
-					if text == self.wrongmsg[i]:
-						tk.messagebox.showerror('Error', f'Duplicate global wrong answer comment detected!\nDuplicate of comment w/ index {i + 1} / {len(self.wrongmsg)}')
-						return
-			if text != '':
-				self.wrongmsg.append(text)
-				self.gui.modified = True
+		def post():
+			if not self.gui.input_string_skip: 
+				self.wrongmsg.append(self.gui.input_string_text)
 				self.index = len(self.wrongmsg) - 1
 				self.gui.message = 'Global wrong answer comment created!'
 			self.menu()
 
-		def discard():
-			if tk.messagebox.askyesno('Discard', 'Discard this comment?', icon = 'warning'): self.menu()
-
-		self.gui.refresh(menubar = False)
-		ttk.Label(text = 'Type your global wrong answer comment.').pack()
-		ttk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
-		ttk.Button(text = 'Discard', command = discard).pack(side = 'bottom', anchor = 's')
-
-		scroll = ttk.Scrollbar(orient = 'vertical')
-		entry = tk.Text(width = self.gui.display_w, yscrollcommand = scroll.set, wrap = 'word')
-		scroll.config(command = entry.yview)
-		scroll.pack(side = 'right', fill = 'y')
-		entry.focus()
-		entry.pack(side = 'left')
+		self.gui.input_string('Global wrong answer comment', post, allow_blank = False)
 
 	def edit(self):
-		def save():
-			text = self.gui.format_text(entry.get('1.0', 'end-1c'))
-			if len(self.wrongmsg) > 0:
-				for i in range(len(self.wrongmsg)):
-					if i != self.index and text == self.wrongmsg[i]:
-						tk.messagebox.showerror('Error', f'Duplicate global wrong answer comment detected!\nDuplicate of comment w/ index {i + 1} / {len(self.wrongmsg)}')
-						return
-			if text != '':
-				self.wrongmsg[self.index] = text
-				self.gui.modified = True
-				self.index = len(self.wrongmsg) - 1
+		def post():
+			if not self.gui.input_string_skip: 
+				self.wrongmsg[self.index] = self.gui.input_string_text
 				self.gui.message = 'Global wrong answer comment saved!'
 			self.menu()
 
-		def discard():
-			text = self.gui.format_text(entry.get('1.0', 'end-1c'))
-			if text != self.wrongmsg[self.index]:
-				if tk.messagebox.askyesno('Discard', 'Discard changes to this comment?', icon = 'warning'): self.menu()
-			else: self.menu()
-
-		self.gui.refresh(menubar = False)
-		ttk.Label(text = 'Type your global wrong answer comment.').pack()
-		ttk.Button(text = 'OK', command = save).pack(side = 'bottom', anchor = 's')
-		ttk.Button(text = 'Discard', command = discard).pack(side = 'bottom', anchor = 's')
-
-		scroll = ttk.Scrollbar(orient = 'vertical')
-		entry = tk.Text(width = self.gui.display_w, yscrollcommand = scroll.set, wrap = 'word')
-		entry.insert('end', self.wrongmsg[self.index])
-		scroll.config(command = entry.yview)
-		scroll.pack(side = 'right', fill = 'y')
-		entry.focus()
-		entry.pack(side = 'left')
+		self.gui.input_string('global wrong answer comment', post, self.wrongmsg[self.index])
 
 	def delete(self):
 		if tk.messagebox.askyesno('Delete this comment?', 'Are you sure you want to delete this comment?', icon = 'warning'):
@@ -807,6 +786,353 @@ class WrongMsg_Editor:
 	def end(self):
 		self.quizconf.wrongmsg_list = self.wrongmsg
 		self.quizconf.menu()
+
+class QuestionViewer:
+	def __init__(self, gui):
+		self.gui = gui
+		self.qeditor = QuestionEditor(self)
+
+	def main(self):
+		self.questions = self.gui.datafile['questions']
+		self.index = 0
+		
+		self.menu()
+
+	def navigation_prev(self, e = None):
+		if self.index > 0:
+			self.index -= 1
+			self.menu()
+	def navigation_next(self, e = None):
+		if self.index < len(self.questions) - 1:
+			self.index += 1
+			self.menu()
+
+	def menu(self):
+		self.gui.refresh()
+		self.gui.print_msg()
+
+		self.gui.window.bind('<Left>', self.navigation_prev)
+		self.gui.window.bind('<Right>', self.navigation_next)
+
+		ttk.Label(text = 'Questions', font = self.gui.bold_font).pack()
+		ttk.Button(text = 'Back', command = self.end).pack(side = 'bottom')
+		ttk.Label().pack(side = 'bottom')
+
+		ttk.Label(text = f'{self.index + 1} / {len(self.questions)}').pack()
+		ttk.Button(text = 'Delete question', command = self.delete, state = 'normal' if len(self.questions) > 1 else 'disabled').pack(side = 'bottom')
+		ttk.Button(text = 'Edit question', command = self.qeditor.main).pack(side = 'bottom')
+		ttk.Button(text = 'Create new question', command = self.new).pack(side = 'bottom')
+		ttk.Label().pack(side = 'bottom')
+		nav_frame = FocusFrame()
+		nav_frame.pack(side = 'bottom', fill = 'x')
+		prev_bt = ttk.Button(nav_frame, text = '< Previous', command = self.navigation_prev)
+		next_bt = ttk.Button(nav_frame, text = 'Next >', command = self.navigation_next)
+		if len(self.questions) > 1:
+			if self.index == 0: prev_bt.config(state = 'disabled')
+			elif self.index == len(self.questions) - 1: next_bt.config(state = 'disabled')
+		else: prev_bt.config(state = 'disabled'); next_bt.config(state = 'disabled')
+		prev_bt.pack(side = 'left'); next_bt.pack(side = 'right')
+
+		frame = HVScrolledFrame(self.gui.window)
+		frame.canvas.config(bg = 'white')
+		frame.interior.config(bg = 'white')
+		frame.pack(fill = 'both', expand = True)
+
+		ttk.Label(frame.interior, text = self.questions[self.index]['question'], background = 'white', justify = 'center').pack()
+		ttk.Label(frame.interior, background = 'white').pack()
+		for opt in ('a', 'b', 'c', 'd'):
+			opt_frame = FocusFrame(frame.interior, bg = 'white'); opt_frame.pack()
+			ttk.Label(opt_frame, text = f'[{opt.upper()}]', font = self.gui.bold_font if self.questions[self.index]['correct'] in [opt, 'all'] else None, background = 'white').pack(side = 'left')
+			ttk.Label(opt_frame, text = self.questions[self.index][opt], background = 'white').pack(side = 'right')
+
+	def new(self):
+		self.questions.append({'question': 'Question', 'a': 'Answer A', 'b': 'Answer B', 'c': 'Answer C', 'd': 'Answer D', 'correct': 'a'})
+		self.gui.modified = True
+		self.index = len(self.questions) - 1
+		self.gui.message = 'Question created!'
+		self.menu()
+
+	def delete(self):
+		if tk.messagebox.askyesno('Delete this question?', 'Are you sure you want to delete this question?', icon = 'warning'):
+			del self.questions[self.index]
+			if len(self.questions) > 0:
+				if self.index > 0: self.index -= 1
+			else: self.index = 0
+			self.gui.modified = True
+			self.gui.message = 'Question deleted.'
+			self.menu()
+
+	def end(self):
+		self.gui.datafile['questions'] = self.questions
+		self.gui.refresh(True)
+
+class QuestionEditor:
+	def __init__(self, qviewer):
+		self.qviewer = qviewer
+		self.gui = qviewer.gui
+		self.qwrongmsg_editor = QWrongMsgEditor(self)
+
+	def main(self):
+		self.qno = self.qviewer.index
+		self.question = self.qviewer.questions[self.qno]
+		self.qlen = len(self.qviewer.questions)
+
+		self.correct_svar = tk.StringVar(); self.correct_svar.set(self.question['correct'].upper())
+		if self.correct_svar.get() == 'ALL': self.correct_svar.set('All answers')
+
+		if not self.gui.jsonhandler.check_question_element('wrongmsg', self.qno, dict): self.question['wrongmsg'] = {}
+		if not self.gui.jsonhandler.check_question_element('explanation', self.qno): self.question['explanation'] = ''
+
+		self.menu()
+
+	def menu(self):
+		self.gui.refresh()
+		self.gui.print_msg()
+
+		editing_text = FocusFrame(); editing_text.pack()
+		ttk.Label(editing_text, text = f'Editing', font = self.gui.bold_font).pack(side = 'left')
+		ttk.Label(editing_text, text = f'Question {self.qno + 1}/{self.qlen}').pack(side = 'right')
+		ttk.Button(text = 'OK', command = self.end).pack(side = 'bottom')
+
+		question_frame = FocusFrame()
+		ttk.Label(question_frame, text = 'Question').pack(side = 'left')
+		ttk.Button(question_frame, text = 'Edit', command = self.question).pack(side = 'right')
+		question_frame.pack(fill = 'x')
+
+		a_frame = FocusFrame()
+		ttk.Label(a_frame, text = 'Answer A').pack(side = 'left')
+		ttk.Button(a_frame, text = 'Edit', command = self.ans_a).pack(side = 'right')
+		a_frame.pack(fill = 'x')
+
+		b_frame = FocusFrame()
+		ttk.Label(b_frame, text = 'Answer B').pack(side = 'left')
+		ttk.Button(b_frame, text = 'Edit', command = self.ans_b).pack(side = 'right')
+		b_frame.pack(fill = 'x')
+
+		c_frame = FocusFrame()
+		ttk.Label(c_frame, text = 'Answer C').pack(side = 'left')
+		ttk.Button(c_frame, text = 'Edit', command = self.ans_c).pack(side = 'right')
+		c_frame.pack(fill = 'x')
+
+		d_frame = FocusFrame()
+		ttk.Label(d_frame, text = 'Answer D').pack(side = 'left')
+		ttk.Button(d_frame, text = 'Edit', command = self.ans_d).pack(side = 'right')
+		d_frame.pack(fill = 'x')
+
+		correct_frame = FocusFrame()
+		ttk.Label(correct_frame, text = 'Correct answer').pack(side = 'left')
+		correct_cbox = ttk.Combobox(correct_frame, textvariable = self.correct_svar, values = ('A', 'B', 'C', 'D', 'All answers'))
+		correct_cbox.bind('<<ComboboxSelected>>', self.process_correct)
+		correct_cbox.pack(side = 'right')
+		correct_frame.pack(fill = 'x')
+
+		wrongmsg_frame = FocusFrame()
+		ttk.Label(wrongmsg_frame, text = 'Wrong answer comments').pack(side = 'left')
+		ttk.Button(wrongmsg_frame, text = 'Edit', command = self.qwrongmsg_editor.main).pack(side = 'right')
+		wrongmsg_frame.pack(fill = 'x')
+
+		explanation_frame = FocusFrame()
+		ttk.Label(explanation_frame, text = 'Explanation').pack(side = 'left')
+		ttk.Button(explanation_frame, text = 'Edit', command = self.explanation).pack(side = 'right')
+		explanation_frame.pack(fill = 'x')
+	
+	def question(self):
+		def post():
+			self.question['question'] = self.gui.input_string_text
+			if not self.gui.input_string_skip: self.gui.message = 'Question saved!'
+			self.menu()
+
+		self.gui.input_string('question', post, self.question['question'], False)
+
+	def ans_a(self):
+		def post():
+			self.question['a'] = self.gui.input_string_text
+			if not self.gui.input_string_skip: self.gui.message = 'Answer A saved!'
+			self.menu()
+
+		self.gui.input_string('answer to choice A', post, self.question['a'], False)
+
+	def ans_b(self):
+		def post():
+			self.question['b'] = self.gui.input_string_text
+			if not self.gui.input_string_skip: self.gui.message = 'Answer B saved!'
+			self.menu()
+
+		self.gui.input_string('answer to choice B', post, self.question['b'], False)
+
+	def ans_c(self):
+		def post():
+			self.question['c'] = self.gui.input_string_text
+			if not self.gui.input_string_skip: self.gui.message = 'Answer C saved!'
+			self.menu()
+
+		self.gui.input_string('answer to choice C', post, self.question['c'], False)
+
+	def ans_d(self):
+		def post():
+			self.question['d'] = self.gui.input_string_text
+			if not self.gui.input_string_skip: self.gui.message = 'Answer D saved!'
+			self.menu()
+
+		self.gui.input_string('answer to choice D', post, self.question['d'], False)
+
+	def process_correct(self, event = None):
+		correct_old = self.question['correct']
+
+		if self.correct_svar.get() == 'All answers': self.question['correct'] = 'all'
+		else: self.question['correct'] = self.correct_svar.get().lower()
+
+		if self.question['correct'] != correct_old:
+			self.gui.modified = True
+			self.gui.set_title()
+
+	def explanation(self):
+		def post():
+			self.question['explanation'] = self.gui.input_string_text
+			if not self.gui.input_string_skip: self.gui.message = 'Explanation saved!'
+			self.menu()
+
+		self.gui.input_string('question explanation', post, self.question['explanation'])
+
+	def end(self):
+		if not self.question['wrongmsg']: del self.question['wrongmsg']
+		if not self.question['explanation']: del self.question['explanation']
+
+		self.qviewer.questions[self.qviewer.index] = self.question
+		self.qviewer.menu()
+
+class QWrongMsgEditor:
+	def __init__(self, qeditor):
+		self.qeditor = qeditor
+		self.gui = qeditor.gui
+
+		self.index_letters = ('a', 'b', 'c', 'd')
+
+	def main(self):
+		self.wrongmsg = self.qeditor.question['wrongmsg']
+		self.index = 0
+
+		self.menu()
+
+	def navigation_prev(self, e = None):
+		if self.index > 0:
+			while True:
+				self.index -= 1
+				if self.index_letters[self.index] in self.wrongmsg: break
+			self.menu()
+	def navigation_next(self, e = None):
+		if self.index < len(self.wrongmsg) - 1:
+			while True:
+				self.index += 1
+				if self.index_letters[self.index] in self.wrongmsg: break
+			self.menu()
+
+	def menu(self):
+		self.gui.refresh()
+		self.gui.print_msg()
+
+		self.gui.window.bind('<Left>', self.navigation_prev)
+		self.gui.window.bind('<Right>', self.navigation_next)
+
+		editing_text = FocusFrame(); editing_text.pack()
+		ttk.Label(editing_text, text = f'Wrong answer comments ', font = self.gui.bold_font).pack(side = 'left')
+		ttk.Label(editing_text, text = f' Question {self.qeditor.qno + 1}/{self.qeditor.qlen}').pack(side = 'right')
+		ttk.Button(text = 'Back', command = self.end).pack(side = 'bottom')
+		ttk.Label().pack(side = 'bottom')
+
+		delbutton = ttk.Button(text = 'Delete comment', command = self.delete); delbutton.pack(side = 'bottom')
+		editbutton = ttk.Button(text = 'Edit comment', command = self.edit); editbutton.pack(side = 'bottom')
+		createbutton = ttk.Button(text = 'Create new comment', command = self.new, state = 'disabled' if len(self.wrongmsg) > 3 else 'normal').pack(side = 'bottom')
+		if len(self.wrongmsg) == 0:
+			ttk.Label(text = 'No wrong answer comments!').pack()
+			editbutton.config(state = 'disabled')
+			delbutton.config(state = 'disabled')
+		else:
+			while True:
+				if self.index_letters[self.index] in self.wrongmsg: break
+				else: self.index += 1
+
+			self.choice_letter = self.index_letters[self.index]
+			ttk.Label(text = f'Message for choice {self.choice_letter.upper()}').pack()
+			ttk.Label().pack(side = 'bottom')
+			nav_frame = FocusFrame()
+			nav_frame.pack(side = 'bottom', fill = 'x')
+			prev_bt = ttk.Button(nav_frame, text = '< Previous', command = self.navigation_prev)
+			next_bt = ttk.Button(nav_frame, text = 'Next >', command = self.navigation_next)
+			if len(self.wrongmsg) > 1:
+				keys = tuple(self.wrongmsg.keys())
+				if self.index == self.index_letters.index(keys[0]): prev_bt.config(state = 'disabled')
+				elif self.index == self.index_letters.index(keys[-1]): next_bt.config(state = 'disabled')
+			else: prev_bt.config(state = 'disabled'); next_bt.config(state = 'disabled')
+			prev_bt.pack(side = 'left'); next_bt.pack(side = 'right')
+
+			scroll = ttk.Scrollbar(orient = 'vertical')
+			text = tk.Text(width = self.gui.display_w, yscrollcommand = scroll.set, wrap = 'word')
+			text.insert('end', self.wrongmsg[self.choice_letter])
+			text.bind('<Key>', self.romsg)
+			scroll.config(command = text.yview)
+			scroll.pack(side = 'right', fill = 'y')
+			text.pack(side = 'left')
+
+	def romsg(self, event = None):
+		tk.messagebox.showinfo('Text read-only', 'To edit this text, click "Edit comment".\nThank you!')
+		return 'break'
+
+	def new(self):
+		c = ''
+
+		def post():
+			if not self.gui.input_string_skip: 
+				self.wrongmsg[c] = self.gui.input_string_text
+				self.index = self.index_letters.index(c)
+				self.gui.message = f'Choice {c.upper()} wrong answer comment created!'
+			self.menu()
+
+		def create(choice):
+			nonlocal c
+			c = choice
+			string = f'rong answer comment for choice {c.upper()}'
+			self.gui.input_string(f'W{string}', post, allow_blank = False, name2 = f'w{string}')
+
+		self.gui.refresh()
+		self.gui.print_msg()
+
+		ttk.Label(text = 'Create new comment', font = self.gui.bold_font).pack()
+		ttk.Label(text = 'Please choose a choice letter:').pack()
+		ttk.Button(text = 'Back', command = self.menu).pack(side = 'bottom')
+
+		letters = FocusFrame(); letters.pack()
+		ttk.Button(letters, text = 'A', command = lambda: create('a'), state = 'disabled' if 'a' in self.wrongmsg else 'normal').pack()
+		ttk.Button(letters, text = 'B', command = lambda: create('b'), state = 'disabled' if 'b' in self.wrongmsg else 'normal').pack()
+		ttk.Button(letters, text = 'C', command = lambda: create('c'), state = 'disabled' if 'c' in self.wrongmsg else 'normal').pack()
+		ttk.Button(letters, text = 'D', command = lambda: create('d'), state = 'disabled' if 'd' in self.wrongmsg else 'normal').pack()
+
+	def edit(self):
+		def post():
+			if not self.gui.input_string_skip: 
+				self.wrongmsg[self.choice_letter] = self.gui.input_string_text
+				self.gui.message = f'Choice {self.choice_letter.upper()} wrong answer comment saved!'
+			self.menu()
+
+		string = f'rong answer comment for choice {self.choice_letter.upper()}'
+		self.gui.input_string(f'W{string}', post, self.wrongmsg[self.choice_letter], False, name2 = f'w{string}')
+
+	def delete(self):
+		if tk.messagebox.askyesno('Delete this comment?', 'Are you sure you want to delete this comment?', icon = 'warning'):
+			del self.wrongmsg[self.choice_letter]
+			if len(self.wrongmsg) > 0:
+				if self.index > self.index_letters.index(tuple(self.wrongmsg.keys())[0]):
+					while True:
+						self.index -= 1
+						if self.index_letters[self.index] in self.wrongmsg: break
+			else: self.index = 0
+			self.gui.modified = True
+			self.gui.message = 'Wrong answer comment deleted.'
+			self.menu()
+
+	def end(self):
+		self.qeditor.question['wrongmsg'] = self.wrongmsg
+		self.qeditor.menu()
 
 class JSONHandler:
 	def __init__(self, gui):
@@ -833,7 +1159,7 @@ class JSONHandler:
 		self.create_backup()
 
 	def open_file(self):
-		filetypes = [('QuizProg-GUI Quiz Projects', '*.qpg'), ('QuizProg Quiz Projects', '*.json'), ('All Files', '*.*')]
+		filetypes = [('All supported types', '*.qpg *.json'), ('QuizProg-GUI Quiz Projects', '*.qpg'), ('QuizProg Quiz Projects', '*.json'), ('All Files', '*.*')]
 		defaultextension = '.json'
 
 		self.savepath_tmp = ''
@@ -841,40 +1167,42 @@ class JSONHandler:
 		if self.savepath_tmp:
 			if os.path.splitext(self.savepath_tmp)[1].casefold() == '.json':
 				pass#if not tk.messagebox.askyesno('Note for JSON files', 'The file you are trying to open is a (console) QuizProg quiz project. However, these quiz projects are limited to the features in (console) QuizProg.\nRight now you are not required to save this file as a QuizProg-GUI quiz project until you want to use new features present in QuizProg-GUI.\nDo you want to continue?'): return False
-			old_path = self.savepath
-			self.savepath = self.savepath_tmp
-			if os.name == 'nt': self.savepath = self.savepath.replace('/', '\\')
-			try:
-				success = False
-				for i in range(1):
-					try: self.datafile = json.load(open(self.savepath, encoding = 'utf-8'))
-					except (json.decoder.JSONDecodeError, UnicodeDecodeError): message = 'Invalid JSON data!'; self.savepath = old_path; break
-					gerror_msg = lambda a: f'String variable \'{a}\' not found or empty!'
-					if not self.check_element('title', rel = False): message = gerror_msg('title'); self.savepath = old_path; break
-					if not self.check_element('questions', list, rel = False): gerror_msg('questions'); self.savepath = old_path; break
-					for i in range(len(self.datafile['questions'])):
-						qerror_msg = lambda a: f'String variable \'{a}\' not found or empty in question {i+1}!'
-						if not self.check_question_element('question', i, rel = False): message = qerror_msg('question'); success = False; self.savepath = old_path; break
-						if not self.check_question_element('a', i, rel = False): message = qerror_msg('a'); success = False; self.savepath = old_path; break
-						if not self.check_question_element('b', i, rel = False): message = qerror_msg('b'); success = False; self.savepath = old_path; break
-						if not self.check_question_element('c', i, rel = False): message = qerror_msg('c'); success = False; self.savepath = old_path; break
-						if not self.check_question_element('d', i, rel = False): message = qerror_msg('d'); success = False; self.savepath = old_path; break
-						if not self.check_question_element('correct', i, rel = False): message = qerror_msg('correct'); success = False; self.savepath = old_path; break
-						success = True
-					if not success: break
-					self.create_backup()
-					message = f'Loaded quiz: {self.savepath}'
-				if not success:
-					self.reload_dtfile()
-					self.create_backup()
-			except OSError:
-				report_error(*sys.exc_info())
-				return False
-
+			success, message = self.check_json(self.savepath_tmp)
 			if success: self.gui.message = message
 			else: self.gui.message_force = message
 			return success
 		else: return False
+
+	def check_json(self, path):
+		old_path = self.savepath
+		self.savepath = path
+		if os.name == 'nt': self.savepath = self.savepath.replace('/', '\\')
+		try:
+			success = False
+			for i in range(1):
+				try: self.datafile = json.load(open(self.savepath, encoding = 'utf-8'))
+				except (json.decoder.JSONDecodeError, UnicodeDecodeError): message = 'Invalid JSON data!'; self.savepath = old_path; break
+				gerror_msg = lambda a: f'String variable \'{a}\' not found or empty!'
+				if not self.check_element('title', rel = False): message = gerror_msg('title'); self.savepath = old_path; break
+				if not self.check_element('questions', list, rel = False): gerror_msg('questions'); self.savepath = old_path; break
+				for i in range(len(self.datafile['questions'])):
+					qerror_msg = lambda a: f'String variable \'{a}\' not found or empty in question {i+1}!'
+					if not self.check_question_element('question', i, rel = False): message = qerror_msg('question'); success = False; self.savepath = old_path; break
+					if not self.check_question_element('a', i, rel = False): message = qerror_msg('a'); success = False; self.savepath = old_path; break
+					if not self.check_question_element('b', i, rel = False): message = qerror_msg('b'); success = False; self.savepath = old_path; break
+					if not self.check_question_element('c', i, rel = False): message = qerror_msg('c'); success = False; self.savepath = old_path; break
+					if not self.check_question_element('d', i, rel = False): message = qerror_msg('d'); success = False; self.savepath = old_path; break
+					if not self.check_question_element('correct', i, rel = False): message = qerror_msg('correct'); success = False; self.savepath = old_path; break
+					success = True
+				if not success: break
+				self.create_backup()
+				message = f'Loaded quiz: {self.savepath}'
+			if not success:
+				self.reload_dtfile()
+				self.create_backup()
+		except OSError: report_error(*sys.exc_info())
+
+		return success, message
 
 	def save_file(self, allow_json):
 		self.reload_dtfile()
@@ -1222,6 +1550,38 @@ class FocusFrame(tk.Frame):
 	def __init__(self, *args, **kwargs):
 		tk.Frame.__init__(self, *args, **kwargs)
 		self.bind('<1>', lambda event: self.focus_set())
+
+# https://stackoverflow.com/a/16198198 + help from ChatGPT (horizontal scrollbar)
+class HVScrolledFrame(FocusFrame):
+	def __init__(self, parent, *args, **kw):
+		FocusFrame.__init__(self, parent, *args, **kw)
+
+		hscrollbar = tk.Scrollbar(self, orient = 'horizontal')
+		hscrollbar.pack(fill = 'x', side = 'bottom')
+		vscrollbar = tk.Scrollbar(self, orient = 'vertical')
+		vscrollbar.pack(fill = 'y', side = 'right')
+
+		self.canvas = canvas = tk.Canvas(self, bd = 0, highlightthickness = 0, yscrollcommand = vscrollbar.set, xscrollcommand = hscrollbar.set)
+		canvas.pack(side = 'left', fill = 'both', expand = True)
+
+		vscrollbar.config(command = canvas.yview)
+		hscrollbar.config(command = canvas.xview)
+
+		canvas.xview_moveto(0)
+		canvas.yview_moveto(0)
+
+		self.interior = interior = FocusFrame(canvas)
+		interior_id = canvas.create_window(0, 0, window = interior, anchor = 'nw')
+
+		def _configure_interior(event):
+			size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
+			canvas.config(scrollregion='0 0 %s %s' % size)
+			if interior.winfo_reqwidth() != canvas.winfo_width(): canvas.config(width = interior.winfo_reqwidth())
+		interior.bind('<Configure>', _configure_interior)
+
+		def _configure_canvas(event):
+			if interior.winfo_reqwidth() != canvas.winfo_width(): canvas.itemconfigure(interior_id, width = canvas.winfo_width())
+		canvas.bind('<Configure>', _configure_canvas)
 
 # https://stackoverflow.com/a/65447493
 class ThreadWithResult(threading.Thread):

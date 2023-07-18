@@ -31,7 +31,8 @@ except ImportError:
 	tk.messagebox.showerror('Hmmm?', err_text)
 	sys.exit()
 
-g = gui.GUI(tk.Tk())
+g = gui.GUI()
+if len(sys.argv) > 1: g.savepath = ' '.join(sys.argv[1:]).strip('"')
 gui.g = g
 while True:
 	try: g.start_main()
