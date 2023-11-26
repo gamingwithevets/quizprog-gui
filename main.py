@@ -1,11 +1,10 @@
 import sys
 
-python_requirement = (3, 6, 0)
+python_requirement = (3, 6, 0, 'alpha', 4)  # 3.6.0a4
 
 import platform
 if sys.version_info < python_requirement:
-	print('Oops! Your Python version is too old.\n')
-	print(f'Requirement: Python {".".join(map(str, python_requirement))}\nYou have   : Python {platform.python_version()}')
+	print('Oops! Your Python version is too old.\nRequirement: Python {}'.format('.'.join(map(str, python_requirement))) + '\nYou have   : Python {}'.format(platform.python_version()))
 	print('\nGet a newer version!')
 	sys.exit()
 

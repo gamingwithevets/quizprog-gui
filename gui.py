@@ -20,7 +20,9 @@ import re
 import copy
 import json
 import threading
+import webbrowser
 import configparser
+import pkg_resources
 import urllib.request
 
 name = 'QuizProg-GUI'
@@ -28,8 +30,8 @@ name = 'QuizProg-GUI'
 username = 'gamingwithevets'
 repo_name = 'quizprog-gui'
 
-version = '1.0.0'
-internal_version = 'v1.0.0'
+version = '1.0.1'
+internal_version = 'v1.0.1'
 prerelease = False
 
 license = 'MIT'
@@ -1276,7 +1278,7 @@ class UpdaterGUI:
 
 			self.win = tk.Toplevel(self.gui.window)
 
-			self.win.geometry('400x200')
+			self.win.geometry('400x400')
 			self.win.resizable(False, False)
 			self.win.protocol('WM_DELETE_WINDOW', self.quit)
 			self.win.title('Updater')
@@ -1313,7 +1315,15 @@ class UpdaterGUI:
 		self.win.mainloop()
 
 	def debug_menu(self):
-		ttk.Label(self.win, text = 'Nothing here yet...').pack()
+		ttk.Button(self.win, text = 'Check updates', command = self.main).pack()
+		ttk.Button(self.win, text = 'Message test', command = lambda: self.draw_msg('Updater message test.\nLine 2\nLine 3\nLine 4')).pack()
+		ttk.Button(self.win, text = 'New update screen test', command = lambda: self.draw_download_msg('testbuild69', None, False, '''\
+Hello! **This is a *test* of the updater\'s Markdown viewer**, made possible with the [Markdown](https://pypi.org/project/Markdown/), [`mdformat`](https://pypi.org/project/mdformat/), and [TkinterWeb](https://pypi.org/project/tkinterweb/) modules.
+
+By the way, [here\'s the GitHub repository](../../) if you want to check it out. And here\'s [TkTemplate](../../../tktemplate) which is a Tkinter template based on RBEditor.
+
+While you\'re here, why don\'t you check out my [Discord server](//gamingwithevets.github.io/redirector/discord)? It\'s pretty empty here, and I\'d really appreciate it if you could join.\
+''')).pack()
 		ttk.Button(self.win, text = 'Quit', command = self.quit).pack(side = 'bottom')
 
 	def start_thread(self):
@@ -1329,7 +1339,7 @@ class UpdaterGUI:
 			if update_info['exceeded']: self.draw_msg('GitHub API rate limit exceeded! Please try again later.')
 			elif update_info['nowifi']: self.draw_msg('Unable to connect to the internet. Please try again\nwhen you have a stable internet connection.')
 			else: self.draw_msg('Unable to check for updates! Please try again later.')
-		elif update_info['newupdate']: self.draw_download_msg(update_info['title'], update_info['tag'], update_info['prerelease'])
+		elif update_info['newupdate']: self.draw_download_msg(update_info['title'], update_info['tag'], update_info['prerelease'], update_info['body'])
 		else: self.draw_msg('You are already using the latest version.')
 
 	def draw_check(self):
@@ -1338,7 +1348,7 @@ class UpdaterGUI:
 		ttk.Label(self.win, text = 'Checking for updates...').pack()
 		self.progressbar = ttk.Progressbar(self.win, orient = 'horizontal', length = 100, mode = 'determinate')
 		self.progressbar.pack()
-		ttk.Label(self.win, text = 'DO NOT close the program\nwhile checking for updates', font = self.gui.bold_font).pack(side = 'bottom').pack()
+		ttk.Label(self.win, text = 'DO NOT close the program\nwhile checking for updates', font = self.gui.bold_font).pack(side = 'bottom')
 
 	def draw_msg(self, msg):
 		if self.auto:
@@ -1352,11 +1362,11 @@ class UpdaterGUI:
 	@staticmethod
 	def package_installed(package):
 		try: pkg_resources.get_distribution(package)
-		except: return False
+		except pkg_resources.DistributionNotFound: return False
 
 		return True
 
-	def draw_download_msg(self, title, tag, prever):
+	def draw_download_msg(self, title, tag, prever, body):
 		if self.auto:
 			self.win.deiconify()
 			self.gui.set_title()
@@ -1367,9 +1377,9 @@ Current version: {self.gui.version}{' (prerelease)' if prerelease else ''}
 New version: {title}{' (prerelease)' if prerelease else ''}\
 ''', justify = 'center').pack()
 		ttk.Button(self.win, text = 'Cancel', command = self.quit).pack(side = 'bottom')
-		ttk.Button(self.win, text = 'Visit download page', command = lambda: self.open_download(tag)).pack(side = 'bottom')
+		ttk.Button(self.win, text = 'Visit download page', command = lambda: self.open_download(tag), state = 'disabled' if tag is None else 'normal').pack(side = 'bottom')
 		
-		self.gui.draw_blank(master = self.win)
+		ttk.Label(self.win).pack()
 
 		packages_missing = []
 		for package in ('markdown', 'mdformat-gfm', 'tkinterweb'):
@@ -1382,7 +1392,12 @@ New version: {title}{' (prerelease)' if prerelease else ''}\
 			import tkinterweb
 
 			html = tkinterweb.HtmlFrame(self.win, messages_enabled = False)
-			html.load_html(markdown.markdown(mdformat.text(body)).replace('../..', f'https://github.com/{username}/{repo_name}'))
+			formatted_body = body
+			formatted_body = formatted_body.replace('(../..', f'(https://github.com/{username}/{repo_name}')
+			formatted_body = formatted_body.replace('(../../..', f'(https://github.com/{username}')
+			formatted_body = formatted_body.replace('(//', f'(https://')
+
+			html.load_html(markdown.markdown(formatted_body))
 			html.on_link_click(webbrowser.open_new_tab)
 			html.pack()
 
@@ -1499,7 +1514,8 @@ class Updater:
 					'prerelease': False,
 					'error': False,
 					'title': response['name'],
-					'tag': response['tag_name']
+					'tag': response['tag_name'],
+					'body': response['body']
 					}
 				else:
 					return {
@@ -1508,35 +1524,35 @@ class Updater:
 					'error': False
 					}
 			else:
-				for version in versions:
-					if not self.check_internet(): return {'newupdate': False, 'error': True, 'exceeded': False, 'nowifi': True}
+				if not self.check_internet(): return {'newupdate': False, 'error': True, 'exceeded': False, 'nowifi': True}
 
-					response = self.request(f'https://api.github.com/repos/{self.username}/{self.reponame}/releases/tags/{version}')
-					if response is None: return {'newupdate': False, 'error': True, 'exceeded': False, 'nowifi': True}
-					try:
-						testvar = response['message']
-						if 'API rate limit exceeded for' in testvar:
-							return {
-							'newupdate': False,
-							'error': True,
-							'exceeded': True
-							}
-						else: return {'newupdate': False, 'error': True, 'exceeded': False, 'nowifi': False}
-					except: pass
-					if currvertime < response['published_at']:
-						return {
-						'newupdate': True,
-						'prerelease': response['prerelease'],
-						'error': False,
-						'title': response['name'],
-						'tag': response['tag_name']
-						}
-					else:
+				response = self.request(f'https://api.github.com/repos/{self.username}/{self.reponame}/releases/tags/{versions[0]}')
+				if response is None: return {'newupdate': False, 'error': True, 'exceeded': False, 'nowifi': True}
+				try:
+					testvar = response['message']
+					if 'API rate limit exceeded for' in testvar:
 						return {
 						'newupdate': False,
-						'unofficial': False,
-						'error': False
+						'error': True,
+						'exceeded': True
 						}
+					else: return {'newupdate': False, 'error': True, 'exceeded': False, 'nowifi': False}
+				except: pass
+				if currvertime < response['published_at']:
+					return {
+					'newupdate': True,
+					'prerelease': response['prerelease'],
+					'error': False,
+					'title': response['name'],
+					'tag': response['tag_name'],
+					'body': response['body']
+					}
+				else:
+					return {
+					'newupdate': False,
+					'unofficial': False,
+					'error': False
+					}
 		except:
 			return {
 			'newupdate': False,
