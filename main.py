@@ -19,7 +19,6 @@ You have 2 options:
 Now scram!''')
 	sys.exit()
 	
-import os
 import traceback
 
 import tkinter.messagebox
@@ -30,11 +29,7 @@ except ImportError:
 	tk.messagebox.showerror('Hmmm?', err_text)
 	sys.exit()
 
-g = gui.GUI()
-if len(sys.argv) > 1: g.savepath = ' '.join(sys.argv[1:]).strip('"')
+g = gui.GUI(sys.argv[1] if len(sys.argv) > 1 else '')
 gui.g = g
-while True:
-	try: g.start_main()
-	except Exception:
-		tk.messagebox.showerror('Error', gui.report_error(*sys.exc_info(), True))
-		sys.exit()
+try: g.start_main()
+except Exception: tk.messagebox.showerror('Error', gui.report_error(*sys.exc_info(), True))

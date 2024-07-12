@@ -4,6 +4,7 @@ if __name__ == '__main__':
 	sys.exit()
 
 import os
+import shutil
 import platform
 import traceback
 import tkinter as tk
@@ -13,52 +14,59 @@ import tkinter.messagebox
 import tkinter.filedialog
 
 try: temp_path = sys._MEIPASS
+
 except AttributeError: temp_path = os.getcwd()
 
 # main modules
 import re
-import copy
 import json
+import time
+import random
+import importlib
 import threading
 import webbrowser
 import configparser
 import pkg_resources
 import urllib.request
+from jsonhandler import JSONHandler
 
 name = 'QuizProg-GUI'
 
 username = 'gamingwithevets'
 repo_name = 'quizprog-gui'
 
-version = '1.0.1'
-internal_version = 'v1.0.1'
+version = '1.1.0'
+internal_version = 'v1.1.0'
 prerelease = False
 
 license = 'MIT'
 
 g = None
 
+def fmt_oserror(exc):
+	if os.name == 'nt':
+		if exc.winerror: errno = f'WE{exc.winerror}'
+		else: errno = exc.errno
+	else: errno = exc.errno
+	return f'[{type(exc).__name__}] {exc.filename}{", "+exc.filename2 if exc.filename2 else ""}: {exc.strerror} ({errno})'
+
 @staticmethod
 def report_error(e, val, tb, fatal = False):
-	err_text = f'{traceback.format_exc()}\nIf this error persists, please report it here:\nhttps://github.com/{username}/{repo_name}/issues'
+	err_text = '\n'.join(traceback.format_exception(e, val, tb)) + f'\nIf this error persists, please report it here:\nhttps://github.com/{username}/{repo_name}/issues'
 
 	exc = val
 
 	print(f'{"Fatal exception" if fatal else "Exception"} raised:\n\n' + err_text)
-	if issubclass(type(exc), OSError):
-		if os.name == 'nt':
-			if exc.winerror: errno = f'WE{exc.winerror}'
-			else: errno = exc.errno
-		else: errno = exc.errno
-		message = f'[{type(exc).__name__}] {exc.strerror} ({errno})'
+	if issubclass(type(exc), OSError): message = fmt_oserror(exc)
 	else: message = f'[{type(exc).__name__}] {exc}'
 	g.set_message_force(message)
+	g.window.update()
 	return 'Oops! A fatal error has occured.\n\n' + err_text
 
 tk.Tk.report_callback_exception = report_error
 
 class GUI:
-	def __init__(self):
+	def __init__(self, savepath, player_mode = False):
 		self.version = version
 
 		self.window = tk.Tk()
@@ -85,22 +93,23 @@ class GUI:
 		self.datafile = {'title': 'My Quiz', 'questions': [{'question': 'Question', 'a': 'Answer A', 'b': 'Answer B', 'c': 'Answer C', 'd': 'Answer D', 'correct': 'a'}]}
 		self.datafile_mode = 'json'
 
-		self.savepath = ''
+		self.savepath = savepath
 		self.allowsave = True
 
 		self.modified = False
 
+		self.player_mode = player_mode
+
 		self.auto_check_updates = tk.BooleanVar(); self.auto_check_updates.set(True)
 		self.check_prerelease_version = tk.BooleanVar(); self.check_prerelease_version.set(False)
 
-		self.updates_checked = False
+		self.updates_checked = player_mode
 
 		self.debug = False
 
 		if os.name == 'nt': self.appdata_folder = f'{os.getenv("LOCALAPPDATA")}\\{name}'
-		else:
-			if platform.system() == 'Darwin': self.appdata_folder = os.path.expanduser(f'~/Library/Application Support/{name}')
-			else: self.appdata_folder = os.path.expanduser(f'~/.config/{name}')
+		elif platform.system() == 'Darwin': self.appdata_folder = os.path.expanduser(f'~/Library/Application Support/{name}')
+		else: self.appdata_folder = os.path.expanduser(f'~/.config/{name}')
 
 		self.save_to_cwd = False
 		self.ini = configparser.ConfigParser()
@@ -109,7 +118,11 @@ class GUI:
 		self.input_string_text = ''
 		self.input_string_skip = False
 
-		self.jsonhandler = JSONHandler(self)
+		self.print_msg()
+
+		self.jsonhandler = JSONHandler(self, report_error)
+		self.compile_exe = CompileEXE(self)
+		self.quiz_player = QuizPlayer(self)
 		self.quizconf = QuizConf(self)
 		self.question_viewer = QuestionViewer(self)
 		self.updater_gui = UpdaterGUI(self)
@@ -127,7 +140,18 @@ class GUI:
 		if not self.updates_checked:
 			if self.auto_check_updates.get(): threading.Thread(target = self.auto_update).start()
 			else: self.updates_checked = True
-		self.window.after(0, self.main if (not self.savepath or self.savepath.isspace()) else self.open_file_startup)
+
+		if self.savepath and not self.savepath.isspace():
+			self.savepath = os.path.abspath(self.savepath)
+			success, message = self.jsonhandler.check_json(self.savepath)
+			if success:
+				self.message = message
+				self.open_file_ex()
+			else:
+				self.message_force = message
+				self.savepath = self.jsonhandler.savepath = ''
+
+		self.window.after(0, self.quiz_player.main if self.player_mode else self.main)
 		self.window.mainloop()
 
 	def auto_update(self):
@@ -294,23 +318,11 @@ class GUI:
 		#else: self.datafile_mode = 'qpg'
 		else: self.datafile_mode = 'json'
 		self.datafile = self.jsonhandler.datafile
-		self.modified = False		
-
-	def open_file_startup(self):
-		self.savepath = os.path.abspath(self.savepath)
-		success, message = self.jsonhandler.check_json(self.savepath)
-		if success:
-			self.message = message
-			self.open_file_ex()
-		else:
-			self.message_force = message
-			self.savepath = self.jsonhandler.savepath = ''
-
-		self.refresh(True)
+		self.modified = False
 
 	def save_file(self):
 		if self.savepath:
-			with open(self.savepath, 'w+') as f: f.write(json.dumps(self.datafile, indent = 4))
+			with open(self.savepath, 'w', encoding = 'utf-8') as f: f.write(json.dumps(self.datafile, ensure_ascii = False, indent = 4))
 			self.message = 'Quiz saved!'
 			self.modified = False
 			self.config_msg()
@@ -347,7 +359,7 @@ Project page: https://github.com/{username}/{repo_name}
 {nl+'WARNING: This is a pre-release version, therefore it may have bugs and/or glitches.'+nl if prerelease else ''}
 Licensed under the {license} license
 
-Copyright (c) 2022-2023 GamingWithEvets Inc.
+Copyright (c) 2022-2024 GamingWithEvets Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy \
 of this software and associated documentation files (the "Software"), to deal \
@@ -396,50 +408,56 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		menubar = tk.Menu(self.window)
 
 		file_menu = tk.Menu(menubar)
-		file_menu.add_command(label = 'New quiz', command = self.new_quiz, accelerator = 'Ctrl+N')
-		file_menu.add_command(label = 'Open...', command = self.open_file, accelerator = 'Ctrl+O')
-		file_menu.add_command(label = 'Save', command = self.save_file, accelerator = 'Ctrl+S')
-		file_menu.add_command(label = 'Save as...', command = self.save_file_as, accelerator = 'Ctrl+Shift+S')
-		file_menu.add_separator()
-		file_menu.add_command(label = 'Compile EXE file', state = 'disabled')
-		file_menu.add_separator()
+		if not self.player_mode:
+			file_menu.add_command(label = 'New quiz', command = self.new_quiz, accelerator = 'Ctrl+N')
+			file_menu.add_command(label = 'Open...', command = self.open_file, accelerator = 'Ctrl+O')
+			file_menu.add_command(label = 'Save', command = self.save_file, accelerator = 'Ctrl+S')
+			self.window.bind('<Control-n>', lambda x: self.new_quiz())
+			self.window.bind('<Control-o>', lambda x: self.open_file())
+			self.window.bind('<Control-s>', lambda x: self.save_file())
+		if (self.player_mode and self.debug) or not self.player_mode:
+			file_menu.add_command(label = 'Save as...', command = self.save_file_as, accelerator = 'Ctrl+Shift+S')
+			file_menu.add_separator()
+			self.window.bind('<Control-Shift-S>', lambda x: self.save_file_as())
+		if not self.player_mode:
+			file_menu.add_command(label = 'Compile EXE file', command = self.compile_exe.main)
+			file_menu.add_separator()
 		file_menu.add_command(label = 'Exit', command = self.quit)
 		menubar.add_cascade(label = 'File', menu = file_menu)
 
-		edit_menu = tk.Menu(menubar)
-		edit_menu.add_command(label = 'Reload', command = self.reload)
-		menubar.add_cascade(label = 'Edit', menu = edit_menu)
+		if not self.player_mode:
+			edit_menu = tk.Menu(menubar)
+			edit_menu.add_command(label = 'Reload', command = self.reload)
+			menubar.add_cascade(label = 'Edit', menu = edit_menu)
 
-		settings_menu = tk.Menu(menubar)
-		updater_settings_menu = tk.Menu(settings_menu)
-		updater_settings_menu.add_checkbutton(label = 'Check for updates on startup', variable = self.auto_check_updates, command = self.save_settings)
-		updater_settings_menu.add_checkbutton(label = 'Check for pre-release versions', variable = self.check_prerelease_version, command = self.save_settings)
-		settings_menu.add_cascade(label = 'Updates', menu = updater_settings_menu)
+		if not self.player_mode:
+			settings_menu = tk.Menu(menubar)
+			updater_settings_menu = tk.Menu(settings_menu)
+			updater_settings_menu.add_checkbutton(label = 'Check for updates on startup', variable = self.auto_check_updates, command = self.save_settings)
+			updater_settings_menu.add_checkbutton(label = 'Check for pre-release versions', variable = self.check_prerelease_version, command = self.save_settings)
+			settings_menu.add_cascade(label = 'Updates', menu = updater_settings_menu)
 
 		if self.debug:
-			settings_menu.add_separator()
-			debug_menu = tk.Menu(settings_menu)
+			debug_menu = tk.Menu(None if self.player_mode else settings_menu)
 			debug_menu.add_command(label = 'Version details', command = self.version_details, accelerator = 'F12')
 			debug_menu.add_separator()
 			debug_menu.add_command(label = 'Updater test', command = lambda: self.updater_gui.init_window(debug = True))
 			debug_menu.add_separator()
 			debug_menu.add_command(label = 'Disable debug mode', command = self.disable_debug)
-			settings_menu.add_cascade(label = 'Debug', menu = debug_menu)
+			if self.player_mode: menubar.add_cascade(label = 'Debug', menu = debug_menu)
+			else:
+				settings_menu.add_separator()
+				settings_menu.add_cascade(label = 'Debug', menu = debug_menu)
 
-		menubar.add_cascade(label = 'Settings', menu = settings_menu)
+		if not self.player_mode: menubar.add_cascade(label = 'Settings', menu = settings_menu)
 
 		help_menu = tk.Menu(menubar)
-		help_menu.add_command(label = 'Check for updates', command = self.updater_gui.init_window)
-		help_menu.add_command(label = f'About {name}', command = self.about_menu)
+		if not self.player_mode: help_menu.add_command(label = 'Check for updates', command = self.updater_gui.init_window)
+		help_menu.add_command(label = f'{"Powered by" if self.player_mode else "About"} {name}', command = self.about_menu)
 		menubar.add_cascade(label = 'Help', menu = help_menu)
 
 		self.window.config(menu = menubar)
 		
-		self.window.bind('<Control-n>', lambda x: self.new_quiz())
-		self.window.bind('<Control-o>', lambda x: self.open_file())
-		self.window.bind('<Control-s>', lambda x: self.save_file())
-		self.window.bind('<Control-Shift-S>', lambda x: self.save_file_as())
-
 	def config_msg(self):
 		if self.msg_label.winfo_exists():
 			if self.message_force: self.msg_label.config(text = self.message_force, background = 'red')
@@ -461,6 +479,7 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		self.print_msg()
 
 		ttk.Label(text = self.datafile['title'], font = self.bold_font).pack()
+		ttk.Label(text = f'--- {len(self.datafile["questions"])} question(s) ---', font = self.bold_font).pack()
 		ttk.Label(text = f'Quiz format: {self.datafile_mode.upper()}').pack()
 		if self.jsonhandler.check_element('description', rel = False):
 			if self.datafile['description']: desc = self.datafile['description']
@@ -473,6 +492,8 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		ttk.Label().pack(side = 'bottom')
 		ttk.Button(text = 'Edit quiz description', command = self.quiz_desc).pack(side = 'bottom')
 		ttk.Button(text = 'Rename quiz', command = self.quiz_name).pack(side = 'bottom')
+		ttk.Label().pack(side = 'bottom')
+		ttk.Button(text = 'Preview quiz', command = self.quiz_player.main).pack(side = 'bottom')
 
 	def format_text(self, text):
 		if len(text) > 0:
@@ -551,6 +572,285 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		self.input_string('Quiz description', post, self.datafile['description'])
 
 	"""----------- END MENUS ---------"""
+
+class CompileEXE:
+	def __init__(self, gui):
+		self.gui = gui
+		self.pyinstaller = None
+		self.text = ''
+
+	def compile_exe_head(self):
+		self.gui.refresh()
+		self.gui.print_msg()
+
+		ttk.Label(text = 'Compile EXE file', font = self.gui.bold_font).pack()
+		ttk.Label(text = '''
+IMPORTANT!
+Due to the nature of PyInstaller, the resulting EXE will only work on your operating system
+version onwards.
+This is an issue with PyInstaller itself so we cannot do anything about it.
+We apologize for any inconvenience caused by this issue.
+''', justify = 'center').pack()
+
+	def main(self):
+		if self.gui.prompt_save_changes(): return
+
+		try:
+			self.pyinstaller = importlib.import_module('PyInstaller.__main__')
+		except ImportError:
+			tk.messagebox.showerror('PyInstaller required', 'The Compile EXE feature needs PyInstaller to function. Please run\n\npip install pyinstaller\n\nin a terminal before using this feature.')
+			return
+
+		self.compile_exe_head()
+		button = ttk.Button(text = 'Compile')
+		button['command'] = lambda: self.compile(button)
+		button.pack()
+
+	def compile(self, button):
+		savefilename = tk.filedialog.askdirectory(title = 'Select resulting EXE location', initialdir = os.getcwd())
+		if not savefilename: return
+
+		button['state'] = 'disabled'
+
+		progressbar = ttk.Progressbar(mode = 'indeterminate')
+		progressbar.pack()
+		label = ttk.Label(justify = 'center')
+		label.pack()
+		
+		thread = ThreadWithResult(target = self.compile_thread, args = (savefilename,))
+		thread.start()
+		while thread.is_alive():
+			self.gui.window.update_idletasks()
+			label['text'] = self.text
+		thread.join()
+
+		progressbar.destroy()
+		label.destroy()
+		button['state'] = 'normal'
+
+		if hasattr(thread, 'result'):
+			fname = thread.result
+			if type(fname) == tuple: report_error(*fname)
+			elif fname is not None:
+				bs = '\\'
+				self.gui.message = f'Compile successful! EXE saved to {fname}'
+				self.gui.config_msg()
+			else: self.gui.set_message_force('Compilation failed!')
+		else: self.gui.set_message_force('Compilation failed!')
+
+	def compile_thread(self, dname):
+		fname = dname.replace('/', '\\')
+		exe_name = f'{self.gui.datafile["title"]}{".exe" if os.name == "nt" else ""}'
+		fname += os.sep + exe_name
+		tmpdir = f'{self.gui.appdata_folder}/tmp{random.randint(0, 99999):05}'
+		qfile = f'quiz.{self.gui.datafile_mode}'
+
+		try:
+			self.text = 'Copying necessary files'
+			os.makedirs(tmpdir)
+			shutil.copy(f'{self.gui.temp_path}/gui.py', tmpdir)
+			shutil.copy(f'{self.gui.temp_path}/jsonhandler.py', tmpdir)
+			with open(f'{tmpdir}/{qfile}', 'w', encoding = 'utf-8') as f:
+				f.write(json.dumps(self.gui.datafile, ensure_ascii = False, indent = 4))
+				f.close()
+			with open(f'{tmpdir}/main.py', 'w') as f:
+				f.write(f'''\
+import sys
+import tkinter.messagebox
+import gui
+g = gui.GUI(sys._MEIPASS + '/{qfile}', True)
+gui.g = g
+try: g.start_main()
+except Exception: tk.messagebox.showerror('Error', gui.report_error(*sys.exc_info(), True))
+''')
+				f.close()
+			self.text = 'Invoking PyInstaller\nThis may take a while'
+			params = [
+			f'{tmpdir}/main.py',
+			'-ywFn', self.gui.datafile['title'],
+			'--distpath', dname,
+			'--workpath', tmpdir,
+			'--specpath', tmpdir,
+			'--add-data', f'{tmpdir}/{qfile}{";" if os.name == "nt" else ":"}.',
+			'--add-data', f'{self.gui.temp_path}/icon{".ico;" if os.name == "nt" else ".xbm:"}.',
+			]
+			if os.name == 'nt' or platform.system == 'Darwin': params.extend(['-i', f'{self.gui.temp_path}/icon.ico'])
+			try: self.pyinstaller.run(params)
+			except SystemExit: pass
+			self.text = 'Cleaning up'
+			shutil.rmtree(tmpdir)
+			if os.path.exists(fname): return fname
+
+		except Exception:
+			self.text = 'Cleaning up'
+			shutil.rmtree(tmpdir)
+			return sys.exc_info()
+
+class QuizPlayer:
+	def __init__(self, gui):
+		self.gui = gui
+		self.question_player = QuestionPlayer(self)
+
+	def main(self):
+		if not self.gui.player_mode and self.gui.prompt_save_changes(): return
+		self.datafile = self.gui.datafile
+		self.menu()
+
+	def menu(self):
+		self.gui.refresh()
+		self.gui.window.title(self.gui.datafile['title'])
+
+		ttk.Label(text = 'Welcome to').pack()
+		ttk.Label(text = self.datafile['title'], font = self.gui.bold_font).pack()
+		if self.gui.jsonhandler.check_element('description', rel = False) and self.datafile['description']: ttk.Label(text = self.datafile['description'], justify = 'center').pack()
+		
+		ttk.Label(text = f'\nPowered by {name} {version}', font = self.gui.italic_font).pack(side = 'bottom')
+		ttk.Button(text = 'Quit', command = self.end).pack(side = 'bottom')
+		ttk.Button(text = 'Start quiz', command = self.question_player.main).pack(side = 'bottom')
+
+	def end(self):
+		if self.gui.player_mode: sys.exit()
+		else: self.gui.refresh(True)
+
+class QuestionPlayer:
+	def __init__(self, quiz_player):
+		self.quiz_player = quiz_player
+		self.gui = quiz_player.gui
+
+	def main(self):
+		self.datafile = self.gui.datafile
+		self.qnum = -1
+		self.lives = self.datafile['lives'] if self.gui.jsonhandler.check_element('lives', int) else None
+		self.questions = self.datafile['questions'].copy()
+		if self.gui.jsonhandler.check_element('randomize', bool) and self.datafile['randomize']: random.shuffle(self.questions)
+
+		self.next_question()
+
+	def next_question(self):
+		self.qnum += 1
+		if self.qnum == len(self.questions): self.finish()
+		else:
+			self.question = self.questions[self.qnum]
+			self.wrongmsg = ''
+			self.display_question()
+
+	def display_question_head(self):
+		showcount = self.gui.jsonhandler.check_element('showcount', bool) and self.datafile['showcount']
+
+		self.gui.window.title(f"{self.gui.datafile['title']} - Question {self.qnum+1}{' / '+len(self.questions) if showcount else ''}")
+		ttk.Label(text = f'Question {self.qnum + 1}{" / "+len(self.questions) if showcount else ""}', font = self.gui.bold_font).pack()
+		if self.lives is not None: ttk.Label(text = f'{self.lives} lives left').pack()
+
+	def display_question(self):
+		self.gui.refresh()
+		self.display_question_head()
+
+		ttk.Button(text = 'Quit', command = self.end).pack(side = 'bottom')
+		ttk.Label().pack(side = 'bottom')
+
+		cd_frame = tk.Frame()
+		TooltipButton(cd_frame, text = self.question['c'], width = 41, command = lambda: self.choose_choice('c')).pack(side = 'left')
+		TooltipButton(cd_frame, text = self.question['d'], width = 41, command = lambda: self.choose_choice('d')).pack(side = 'right')
+		cd_frame.pack(side = 'bottom', fill = 'x')
+		ttk.Label(text = 'Hover over a button for full answer', font = self.gui.italic_font).pack(side = 'bottom')
+
+		ab_frame = tk.Frame()
+		TooltipButton(ab_frame, text = self.question['a'], width = 41, command = lambda: self.choose_choice('a')).pack(side = 'left')
+		TooltipButton(ab_frame, text = self.question['b'], width = 41, command = lambda: self.choose_choice('b')).pack(side = 'right')
+		ab_frame.pack(side = 'bottom', fill = 'x')
+		ttk.Label().pack(side = 'bottom')
+		ttk.Label(text = self.wrongmsg).pack(side = 'bottom')
+		ttk.Label().pack(side = 'bottom')
+
+		frame = VerticalScrolledFrame(self.gui.window)
+		frame.canvas.config(bg = 'white')
+		frame.interior.config(bg = 'white')
+		frame.pack(fill = 'both', expand = True)
+
+		question = ttk.Label(frame.interior, text = self.question['question'], background = 'white', justify = 'center')
+		question.bind('<Configure>', lambda e: e.widget.config(wraplength=e.widget.winfo_width()))
+		question.pack()
+		ttk.Label(frame.interior, background = 'white').pack()
+
+	def choice_correct(self, choice):
+		if self.question['correct'] == 'all': return True
+		else: return self.question['correct'] == choice
+
+	def choose_choice(self, choice):
+		if self.choice_correct(choice): self.correct()
+		else:
+			if self.gui.jsonhandler.check_question_element('wrongmsg', self.qnum, dict) and choice in self.question['wrongmsg']: self.wrongmsg = self.question['wrongmsg'][choice]
+			elif self.gui.jsonhandler.check_element('wrongmsg', list): self.wrongmsg = random.choice(self.datafile['wrongmsg'])
+			else: self.wrongmsg = f'Choice {choice.upper()} is incorrect!{" You lost a life!" if self.lives is not None else ""}'
+			if self.lives is not None:
+				self.lives -= 1
+				if not self.lives: self.fail()
+				else: self.display_question()
+			else: self.display_question()
+
+	def correct(self):
+		if self.gui.jsonhandler.check_question_element('explanation', self.qnum, str):
+			self.gui.refresh()
+			self.display_question_head()
+
+			ttk.Button(text = 'Next', command = self.next_question).pack(side = 'bottom')
+			ttk.Label().pack(side = 'bottom')
+
+			ttk.Label(text = '\nCorrect!', justify = 'center', font = self.gui.italic_font).pack()
+
+			frame = VerticalScrolledFrame(self.gui.window)
+			frame.canvas.config(bg = 'white')
+			frame.interior.config(bg = 'white')
+			frame.pack(fill = 'both', expand = True)
+
+			question = ttk.Label(frame.interior, text = self.question['explanation'], background = 'white', justify = 'center')
+			question.bind('<Configure>', lambda e: e.widget.config(wraplength=e.widget.winfo_width()))
+			question.pack()
+			ttk.Label(frame.interior, background = 'white').pack()
+		else: self.next_question()
+
+	def finish(self):
+		self.gui.refresh()
+		self.gui.window.title(self.gui.datafile['title'])
+
+		ttk.Button(text = 'Return to menu', command = self.quiz_player.menu).pack(side = 'bottom')
+		ttk.Label().pack(side = 'bottom')
+
+		ttk.Label(text = 'Quiz completed!', justify = 'center', font = self.gui.bold_font).pack()
+
+		if self.gui.jsonhandler.check_element('finish', str):
+			frame = VerticalScrolledFrame(self.gui.window)
+			frame.canvas.config(bg = 'white')
+			frame.interior.config(bg = 'white')
+			frame.pack(fill = 'both', expand = True)
+
+			question = ttk.Label(frame.interior, text = self.datafile['finish'], background = 'white', justify = 'center')
+			question.bind('<Configure>', lambda e: e.widget.config(wraplength=e.widget.winfo_width()))
+			question.pack()
+			ttk.Label(frame.interior, background = 'white').pack()
+
+	def fail(self):
+		self.gui.refresh()
+
+		ttk.Button(text = 'Return to menu', command = self.quiz_player.menu).pack(side = 'bottom')
+		ttk.Button(text = 'Try again!', command = self.main).pack(side = 'bottom')
+		ttk.Label().pack(side = 'bottom')
+
+		ttk.Label(text = 'Game Over', justify = 'center', font = self.gui.bold_font).pack()
+
+		if self.gui.jsonhandler.check_element('fail', str):
+			frame = VerticalScrolledFrame(self.gui.window)
+			frame.canvas.config(bg = 'white')
+			frame.interior.config(bg = 'white')
+			frame.pack(fill = 'both', expand = True)
+
+			question = ttk.Label(frame.interior, text = self.datafile['fail'], background = 'white', justify = 'center')
+			question.bind('<Configure>', lambda e: e.widget.config(wraplength=e.widget.winfo_width()))
+			question.pack()
+			ttk.Label(frame.interior, background = 'white').pack()
+
+	def end(self):
+		if tk.messagebox.askyesno('Quit the quiz?', 'Are you sure you want to quit this quiz?', icon = 'warning'): self.quiz_player.menu()
 
 class QuizConf:
 	def __init__(self, gui):
@@ -713,6 +1013,13 @@ class WrongMsgEditor:
 			self.index += 1
 			self.menu()
 
+	def navigation_prev_jmp(self):
+		self.index = 0
+		self.menu()
+	def navigation_next_jmp(self):
+		self.index = len(self.wrongmsg) - 1
+		self.menu()
+
 	def menu(self):
 		self.gui.refresh()
 		self.gui.print_msg()
@@ -736,17 +1043,28 @@ class WrongMsgEditor:
 			ttk.Label().pack(side = 'bottom')
 			nav_frame = FocusFrame()
 			nav_frame.pack(side = 'bottom', fill = 'x')
+			prev_jmp_bt = ttk.Button(nav_frame, text = '<<', width = 3, command = self.navigation_prev_jmp)
 			prev_bt = ttk.Button(nav_frame, text = '< Previous', command = self.navigation_prev)
 			next_bt = ttk.Button(nav_frame, text = 'Next >', command = self.navigation_next)
+			next_jmp_bt = ttk.Button(nav_frame, text = '>>', width = 3, command = self.navigation_next_jmp)
 			if len(self.wrongmsg) > 1:
-				if self.index == 0: prev_bt.config(state = 'disabled')
-				elif self.index == len(self.wrongmsg) - 1: next_bt.config(state = 'disabled')
-			else: prev_bt.config(state = 'disabled'); next_bt.config(state = 'disabled')
-			prev_bt.pack(side = 'left'); next_bt.pack(side = 'right')
+				if self.index == 0:
+					prev_bt.config(state = 'disabled')
+					prev_jmp_bt.config(state = 'disabled')
+				elif self.index == len(self.wrongmsg) - 1:
+					next_bt.config(state = 'disabled')
+					next_jmp_bt.config(state = 'disabled')
+			else:
+				prev_jmp_bt.config(state = 'disabled')
+				prev_bt.config(state = 'disabled')
+				next_bt.config(state = 'disabled')
+				next_jmp_bt.config(state = 'disabled')
+			prev_jmp_bt.pack(side = 'left'); prev_bt.pack(side = 'left')
+			next_jmp_bt.pack(side = 'right'); next_bt.pack(side = 'right')
 
 			scroll = ttk.Scrollbar(orient = 'vertical')
 			text = tk.Text(width = self.gui.display_w, yscrollcommand = scroll.set, wrap = 'word')
-			text.insert('end', self.wrongmsg[selfi.index])
+			text.insert('end', self.wrongmsg[self.index])
 			text.bind('<Key>', self.romsg)
 			scroll.config(command = text.yview)
 			scroll.pack(side = 'right', fill = 'y')
@@ -795,6 +1113,12 @@ class QuestionViewer:
 		self.qeditor = QuestionEditor(self)
 
 	def main(self):
+		self.gui.refresh()
+		self.gui.print_msg()
+		ttk.Label(text = 'Questions', font = self.gui.bold_font).pack()
+		ttk.Label(text = 'Please wait... this may take a while for large quizzes.').pack()
+		self.gui.window.update()
+
 		self.questions = self.gui.datafile['questions']
 		self.index = 0
 		
@@ -805,9 +1129,16 @@ class QuestionViewer:
 			self.index -= 1
 			self.menu()
 	def navigation_next(self, e = None):
-		if self.index < len(self.questions) - 1:
+		if self.index < len(self.questions) - 1: 
 			self.index += 1
 			self.menu()
+
+	def navigation_prev_jmp(self):
+		self.index = 0
+		self.menu()
+	def navigation_next_jmp(self):
+		self.index = len(self.questions) - 1
+		self.menu()
 
 	def menu(self):
 		self.gui.refresh()
@@ -827,25 +1158,41 @@ class QuestionViewer:
 		ttk.Label().pack(side = 'bottom')
 		nav_frame = FocusFrame()
 		nav_frame.pack(side = 'bottom', fill = 'x')
+		prev_jmp_bt = ttk.Button(nav_frame, text = '<<', width = 3, command = self.navigation_prev_jmp)
 		prev_bt = ttk.Button(nav_frame, text = '< Previous', command = self.navigation_prev)
 		next_bt = ttk.Button(nav_frame, text = 'Next >', command = self.navigation_next)
+		next_jmp_bt = ttk.Button(nav_frame, text = '>>', width = 3, command = self.navigation_next_jmp)
 		if len(self.questions) > 1:
-			if self.index == 0: prev_bt.config(state = 'disabled')
-			elif self.index == len(self.questions) - 1: next_bt.config(state = 'disabled')
-		else: prev_bt.config(state = 'disabled'); next_bt.config(state = 'disabled')
-		prev_bt.pack(side = 'left'); next_bt.pack(side = 'right')
+			if self.index == 0:
+				prev_bt.config(state = 'disabled')
+				prev_jmp_bt.config(state = 'disabled')
+			elif self.index == len(self.questions) - 1:
+				next_bt.config(state = 'disabled')
+				next_jmp_bt.config(state = 'disabled')
+		else:
+			prev_jmp_bt.config(state = 'disabled')
+			prev_bt.config(state = 'disabled')
+			next_bt.config(state = 'disabled')
+			next_jmp_bt.config(state = 'disabled')
+		prev_jmp_bt.pack(side = 'left'); prev_bt.pack(side = 'left')
+		next_jmp_bt.pack(side = 'right'); next_bt.pack(side = 'right')
 
-		frame = HVScrolledFrame(self.gui.window)
+
+		frame = VerticalScrolledFrame(self.gui.window)
 		frame.canvas.config(bg = 'white')
 		frame.interior.config(bg = 'white')
 		frame.pack(fill = 'both', expand = True)
 
-		ttk.Label(frame.interior, text = self.questions[self.index]['question'], background = 'white', justify = 'center').pack()
+		question = ttk.Label(frame.interior, text = self.questions[self.index]['question'], background = 'white', justify = 'center')
+		question.bind('<Configure>', lambda e: e.widget.config(wraplength=e.widget.winfo_width()))
+		question.pack()
 		ttk.Label(frame.interior, background = 'white').pack()
 		for opt in ('a', 'b', 'c', 'd'):
 			opt_frame = FocusFrame(frame.interior, bg = 'white'); opt_frame.pack()
 			ttk.Label(opt_frame, text = f'[{opt.upper()}]', font = self.gui.bold_font if self.questions[self.index]['correct'] in [opt, 'all'] else None, background = 'white').pack(side = 'left')
-			ttk.Label(opt_frame, text = self.questions[self.index][opt], background = 'white').pack(side = 'right')
+			opt_txt = ttk.Label(opt_frame, text = self.questions[self.index][opt], background = 'white')
+			opt_txt.bind('<Configure>', lambda e: e.widget.config(wraplength=e.widget.winfo_width()))
+			opt_txt.pack(side = 'right')
 
 	def new(self):
 		self.questions.append({'question': 'Question', 'a': 'Answer A', 'b': 'Answer B', 'c': 'Answer C', 'd': 'Answer D', 'correct': 'a'})
@@ -898,7 +1245,7 @@ class QuestionEditor:
 
 		question_frame = FocusFrame()
 		ttk.Label(question_frame, text = 'Question').pack(side = 'left')
-		ttk.Button(question_frame, text = 'Edit', command = self.question).pack(side = 'right')
+		test = ttk.Button(question_frame, text = 'Edit', command = self.ques).pack(side = 'right')
 		question_frame.pack(fill = 'x')
 
 		a_frame = FocusFrame()
@@ -938,7 +1285,7 @@ class QuestionEditor:
 		ttk.Button(explanation_frame, text = 'Edit', command = self.explanation).pack(side = 'right')
 		explanation_frame.pack(fill = 'x')
 	
-	def question(self):
+	def ques(self):
 		def post():
 			self.question['question'] = self.gui.input_string_text
 			if not self.gui.input_string_skip: self.gui.message = 'Question saved!'
@@ -1017,17 +1364,15 @@ class QWrongMsgEditor:
 		self.menu()
 
 	def navigation_prev(self, e = None):
-		if self.index > 0:
-			while True:
-				self.index -= 1
-				if self.index_letters[self.index] in self.wrongmsg: break
-			self.menu()
+		while self.index > 0:
+			self.index -= 1
+			if self.index_letters[self.index] in self.wrongmsg: break
+		self.menu()
 	def navigation_next(self, e = None):
-		if self.index < len(self.wrongmsg) - 1:
-			while True:
-				self.index += 1
-				if self.index_letters[self.index] in self.wrongmsg: break
-			self.menu()
+		while self.index < 3:
+			self.index += 1
+			if self.index_letters[self.index] in self.wrongmsg: break
+		self.menu()
 
 	def menu(self):
 		self.gui.refresh()
@@ -1135,130 +1480,6 @@ class QWrongMsgEditor:
 	def end(self):
 		self.qeditor.question['wrongmsg'] = self.wrongmsg
 		self.qeditor.menu()
-
-class JSONHandler:
-	def __init__(self, gui):
-		self.gui = gui
-
-		self.datafile_new = copy.deepcopy(self.gui.datafile)
-		self.new_quiz()
-
-		self.savepath = ''
-		self.savepath_tmp = ''
-		self.message = None
-
-	def reload_dtfile(self): self.datafile = self.gui.datafile
-
-	def reload(self):
-		self.reload_dtfile()
-		self.datafile = copy.deepcopy(self.datafile_bak)
-		self.gui.datafile = copy.deepcopy(self.datafile)
-
-	def create_backup(self): self.datafile_bak = copy.deepcopy(self.datafile)
-
-	def new_quiz(self):
-		self.datafile = copy.deepcopy(self.datafile_new)
-		self.create_backup()
-
-	def open_file(self):
-		filetypes = [('All supported types', '*.qpg *.json'), ('QuizProg-GUI Quiz Projects', '*.qpg'), ('QuizProg Quiz Projects', '*.json'), ('All Files', '*.*')]
-		defaultextension = '.json'
-
-		self.savepath_tmp = ''
-		self.savepath_tmp = tk.filedialog.askopenfilename(initialdir = os.path.dirname(self.savepath) if self.savepath else os.getcwd(), filetypes = filetypes, defaultextension = defaultextension)
-		if self.savepath_tmp:
-			if os.path.splitext(self.savepath_tmp)[1].casefold() == '.json':
-				pass#if not tk.messagebox.askyesno('Note for JSON files', 'The file you are trying to open is a (console) QuizProg quiz project. However, these quiz projects are limited to the features in (console) QuizProg.\nRight now you are not required to save this file as a QuizProg-GUI quiz project until you want to use new features present in QuizProg-GUI.\nDo you want to continue?'): return False
-			success, message = self.check_json(self.savepath_tmp)
-			if success: self.gui.message = message
-			else: self.gui.message_force = message
-			return success
-		else: return False
-
-	def check_json(self, path):
-		old_path = self.savepath
-		self.savepath = path
-		if os.name == 'nt': self.savepath = self.savepath.replace('/', '\\')
-		try:
-			success = False
-			for i in range(1):
-				try: self.datafile = json.load(open(self.savepath, encoding = 'utf-8'))
-				except (json.decoder.JSONDecodeError, UnicodeDecodeError): message = 'Invalid JSON data!'; self.savepath = old_path; break
-				gerror_msg = lambda a: f'String variable \'{a}\' not found or empty!'
-				if not self.check_element('title', rel = False): message = gerror_msg('title'); self.savepath = old_path; break
-				if not self.check_element('questions', list, rel = False): gerror_msg('questions'); self.savepath = old_path; break
-				for i in range(len(self.datafile['questions'])):
-					qerror_msg = lambda a: f'String variable \'{a}\' not found or empty in question {i+1}!'
-					if not self.check_question_element('question', i, rel = False): message = qerror_msg('question'); success = False; self.savepath = old_path; break
-					if not self.check_question_element('a', i, rel = False): message = qerror_msg('a'); success = False; self.savepath = old_path; break
-					if not self.check_question_element('b', i, rel = False): message = qerror_msg('b'); success = False; self.savepath = old_path; break
-					if not self.check_question_element('c', i, rel = False): message = qerror_msg('c'); success = False; self.savepath = old_path; break
-					if not self.check_question_element('d', i, rel = False): message = qerror_msg('d'); success = False; self.savepath = old_path; break
-					if not self.check_question_element('correct', i, rel = False): message = qerror_msg('correct'); success = False; self.savepath = old_path; break
-					success = True
-				if not success: break
-				self.create_backup()
-				message = f'Loaded quiz: {self.savepath}'
-			if not success:
-				self.reload_dtfile()
-				self.create_backup()
-		except OSError: report_error(*sys.exc_info())
-
-		return success, message
-
-	def save_file(self, allow_json):
-		self.reload_dtfile()
-		
-		self.savepath_tmp = ''
-		self.savepath_tmp = tk.filedialog.asksaveasfilename(initialdir = os.path.dirname(self.savepath) if self.savepath else os.getcwd(), initialfile = f'{self.datafile["title"]}.qpg', filetypes = [('QuizProg-GUI Quiz Projects', '*.qpg'), ('QuizProg Quiz Projects', '*.json'), ('All Files', '*.*')], defaultextension = '.qpg')
-		if self.savepath_tmp:
-			if os.path.splitext(self.savepath_tmp)[1].casefold() == '.json' and not allow_json:
-				tk.messagebox.showerror('Cannot save as JSON', 'To use new features present in QuizProg-GUI, you must save this file as a QuizProg-GUI quiz project.')
-				return False
-			self.savepath = self.savepath_tmp
-			if os.name == 'nt': self.savepath = self.savepath.replace('/', '\\')
-			success = False
-			try:
-				with open(self.savepath, 'w+') as f: f.write(json.dumps(self.datafile, indent = 4))
-				message = f'Quiz saved as: {self.savepath}'
-				success = True
-			except OSError:
-				report_error(*sys.exc_info())
-				return False
-
-			if success: self.gui.message = message
-			else: self.gui.message_force = message
-			return success
-		else: return False
-
-	def check_element(self, element, valtype = str, rel = True):
-		if rel: self.reload_dtfile()
-
-		test1 = False
-		test2 = False
-		test3 = False
-		if element in self.datafile:
-			test1 = True
-			if not (type(self.datafile[element]) is not bool and not self.datafile[element]): test2 = True
-			if type(self.datafile[element]) is valtype: test3 = True
-
-		if test1 and test2 and test3: return True
-		else: return False
-
-	def check_question_element(self, element, qid, valtype = str, rel = True):
-		if rel: self.reload_dtfile()
-
-		test1 = False
-		test2 = False
-		test3 = False
-
-		if element in self.datafile['questions'][qid]:
-			test1 = True
-			if self.datafile['questions'][qid][element]: test2 = True
-			if type(self.datafile['questions'][qid][element]) is valtype: test3 = True
-
-		if test1 and test2 and test3: return True
-		else: return False
 
 class UpdaterGUI:
 	def __init__(self, gui):
@@ -1567,40 +1788,96 @@ class FocusFrame(tk.Frame):
 		tk.Frame.__init__(self, *args, **kwargs)
 		self.bind('<1>', lambda event: self.focus_set())
 
-# https://stackoverflow.com/a/16198198 + help from ChatGPT (horizontal scrollbar)
-class HVScrolledFrame(FocusFrame):
+# https://stackoverflow.com/a/16198198 (modified)
+class VerticalScrolledFrame(tk.Frame):
 	def __init__(self, parent, *args, **kw):
-		FocusFrame.__init__(self, parent, *args, **kw)
+		tk.Frame.__init__(self, parent, *args, **kw)
 
-		hscrollbar = tk.Scrollbar(self, orient = 'horizontal')
-		hscrollbar.pack(fill = 'x', side = 'bottom')
 		vscrollbar = tk.Scrollbar(self, orient = 'vertical')
 		vscrollbar.pack(fill = 'y', side = 'right')
+		self.canvas = tk.Canvas(self, bd = 0, highlightthickness = 0, yscrollcommand = vscrollbar.set)
+		self.canvas.pack(side = 'left', fill = 'both', expand = True)
+		vscrollbar.config(command = self.canvas.yview)
 
-		self.canvas = canvas = tk.Canvas(self, bd = 0, highlightthickness = 0, yscrollcommand = vscrollbar.set, xscrollcommand = hscrollbar.set)
-		canvas.pack(side = 'left', fill = 'both', expand = True)
+		self.canvas.xview_moveto(0)
+		self.canvas.yview_moveto(0)
 
-		vscrollbar.config(command = canvas.yview)
-		hscrollbar.config(command = canvas.xview)
-
-		canvas.xview_moveto(0)
-		canvas.yview_moveto(0)
-
-		self.interior = interior = FocusFrame(canvas)
-		interior_id = canvas.create_window(0, 0, window = interior, anchor = 'nw')
+		self.interior = interior = tk.Frame(self.canvas)
+		interior_id = self.canvas.create_window(0, 0, window = interior, anchor = 'nw')
 
 		def _configure_interior(event):
 			size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
-			canvas.config(scrollregion='0 0 %s %s' % size)
-			if interior.winfo_reqwidth() != canvas.winfo_width(): canvas.config(width = interior.winfo_reqwidth())
+			self.canvas.config(scrollregion = '0 0 %s %s' % size)
+			if interior.winfo_reqwidth() != self.canvas.winfo_width():
+				self.canvas.config(width=interior.winfo_reqwidth())
 		interior.bind('<Configure>', _configure_interior)
 
 		def _configure_canvas(event):
-			if interior.winfo_reqwidth() != canvas.winfo_width(): canvas.itemconfigure(interior_id, width = canvas.winfo_width())
-		canvas.bind('<Configure>', _configure_canvas)
+			if interior.winfo_reqwidth() != self.canvas.winfo_width():
+				self.canvas.itemconfigure(interior_id, width=self.canvas.winfo_width())
+		self.canvas.bind('<Configure>', _configure_canvas)
+
+# https://stackoverflow.com/a/36221216
+class Tooltip:
+	"""
+	create a tooltip for a given widget
+	"""
+	def __init__(self, widget, text='widget info'):
+		self.waittime = 500     #miliseconds
+		self.wraplength = 180   #pixels
+		self.widget = widget
+		self.text = text
+		self.widget.bind("<Enter>", self.enter)
+		self.widget.bind("<Leave>", self.leave)
+		self.widget.bind("<ButtonPress>", self.leave)
+		self.id = None
+		self.tw = None
+
+	def enter(self, event=None):
+		self.schedule()
+
+	def leave(self, event=None):
+		self.unschedule()
+		self.hidetip()
+
+	def schedule(self):
+		self.unschedule()
+		self.id = self.widget.after(self.waittime, self.showtip)
+
+	def unschedule(self):
+		id = self.id
+		self.id = None
+		if id:
+			self.widget.after_cancel(id)
+
+	def showtip(self, event=None):
+		x = y = 0
+		x, y, cx, cy = self.widget.bbox("insert")
+		x += self.widget.winfo_rootx() + 25
+		y += self.widget.winfo_rooty() + 20
+		# creates a toplevel window
+		self.tw = tk.Toplevel(self.widget)
+		# Leaves only the label and removes the app window
+		self.tw.wm_overrideredirect(True)
+		self.tw.wm_geometry("+%d+%d" % (x, y))
+		label = tk.Label(self.tw, text=self.text, justify='left',
+					   background="#ffffff", relief='solid', borderwidth=1,
+					   wraplength = self.wraplength)
+		label.pack(ipadx=1)
+
+	def hidetip(self):
+		tw = self.tw
+		self.tw= None
+		if tw:
+			tw.destroy()
+
+class TooltipButton(ttk.Button):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.tooltip = Tooltip(self, self['text'])
 
 # https://stackoverflow.com/a/65447493
 class ThreadWithResult(threading.Thread):
-	def __init__(self, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
+	def __init__(self, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=False):
 		def function(): self.result = target(*args, **kwargs)
 		super().__init__(group=group, target=function, name=name, daemon=daemon)
