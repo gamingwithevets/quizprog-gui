@@ -5,9 +5,10 @@ import tkinter as tk
 import tkinter.filedialog
 
 class JSONHandler:
-	def __init__(self, gui, report_error):
+	def __init__(self, gui, report_error, fmt_oserror):
 		self.gui = gui
 		self.report_error = report_error
+		self.fmt_oserror = fmt_oserror
 
 		self.datafile_new = copy.deepcopy(self.gui.datafile)
 		self.new_quiz()
@@ -52,7 +53,7 @@ class JSONHandler:
 			success = False
 			for i in range(1):
 				try: self.datafile = json.load(open(self.savepath, encoding = 'utf-8'))
-				except OSError as exc: message = fmt_oserror(exc); self.savepath = old_path; break
+				except OSError as exc: message = self.fmt_oserror(exc); self.savepath = old_path; break
 				except (json.decoder.JSONDecodeError, UnicodeDecodeError): message = 'Invalid JSON data!'; self.savepath = old_path; break
 				gerror_msg = lambda a: f'String variable \'{a}\' not found or empty!'
 				if not self.check_element('title', rel = False): message = gerror_msg('title'); self.savepath = old_path; break

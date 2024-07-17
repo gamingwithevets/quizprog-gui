@@ -35,8 +35,8 @@ name = 'QuizProg-GUI'
 username = 'gamingwithevets'
 repo_name = 'quizprog-gui'
 
-version = '1.1.0'
-internal_version = 'v1.1.0'
+version = '1.1.1'
+internal_version = 'v1.1.1'
 prerelease = False
 
 license = 'MIT'
@@ -118,9 +118,7 @@ class GUI:
 		self.input_string_text = ''
 		self.input_string_skip = False
 
-		self.print_msg()
-
-		self.jsonhandler = JSONHandler(self, report_error)
+		self.jsonhandler = JSONHandler(self, report_error, fmt_oserror)
 		self.compile_exe = CompileEXE(self)
 		self.quiz_player = QuizPlayer(self)
 		self.quizconf = QuizConf(self)
@@ -142,6 +140,7 @@ class GUI:
 			else: self.updates_checked = True
 
 		if self.savepath and not self.savepath.isspace():
+			if not self.savepath.endswith('.json') and not self.savepath.endswith('.qpg'): tk.messagebox.showwarning('Warning', f"Your quiz's extension is of a file type unsupported by {name}. You'll still be able to load the file normally, but it is recommended to fix this issue in the future.")
 			self.savepath = os.path.abspath(self.savepath)
 			success, message = self.jsonhandler.check_json(self.savepath)
 			if success:
@@ -462,8 +461,9 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		if self.msg_label.winfo_exists():
 			if self.message_force: self.msg_label.config(text = self.message_force, background = 'red')
 			elif self.message: self.msg_label.config(text = self.message, background = 'green')
-			else: self.msg_label.config(text = f'QuizProg - GUI edition. Version {version}. © 2023 GamingWithEvets Inc.', background = 'black')
+			else: self.msg_label.config(text = f'QuizProg - GUI edition. Version {version}. © 2024 GamingWithEvets Inc.', background = 'black')
 			self.message = self.message_force = None
+			Tooltip(self.msg_label, self.msg_label['text'])
 
 	def print_msg(self):
 		self.msg_label = ttk.Label(foreground = 'white', anchor = 'center', width = self.display_w)
@@ -593,24 +593,29 @@ We apologize for any inconvenience caused by this issue.
 ''', justify = 'center').pack()
 
 	def main(self):
-		if self.gui.prompt_save_changes(): return
+		if hasattr(sys, '_MEIPASS'):
+			tk.messagebox.showerror('Error', f'As of this time the Compile EXE feature does not work on binary versions of {name}. We are sorry for this inconvenience.')
+			return
 
-		try:
-			self.pyinstaller = importlib.import_module('PyInstaller.__main__')
+		try: self.pyinstaller = importlib.import_module('PyInstaller.__main__')
 		except ImportError:
 			tk.messagebox.showerror('PyInstaller required', 'The Compile EXE feature needs PyInstaller to function. Please run\n\npip install pyinstaller\n\nin a terminal before using this feature.')
 			return
 
-		self.compile_exe_head()
-		button = ttk.Button(text = 'Compile')
-		button['command'] = lambda: self.compile(button)
-		button.pack()
+		if self.gui.prompt_save_changes(): return
 
-	def compile(self, button):
+		self.compile_exe_head()
+		self.compile_button = ttk.Button(text = 'Compile', command = self.compile)
+		self.compile_button.pack()
+		self.quit_button = ttk.Button(text = 'Quit', command = lambda: self.gui.refresh(True))
+		self.quit_button.pack(side = 'bottom')
+
+	def compile(self):
 		savefilename = tk.filedialog.askdirectory(title = 'Select resulting EXE location', initialdir = os.getcwd())
 		if not savefilename: return
 
-		button['state'] = 'disabled'
+		self.compile_button['state'] = 'disabled'
+		self.quit_button['state'] = 'disabled'
 
 		progressbar = ttk.Progressbar(mode = 'indeterminate')
 		progressbar.pack()
@@ -626,11 +631,12 @@ We apologize for any inconvenience caused by this issue.
 
 		progressbar.destroy()
 		label.destroy()
-		button['state'] = 'normal'
+		self.compile_button['state'] = 'normal'
+		self.quit_button['state'] = 'normal'
 
 		if hasattr(thread, 'result'):
 			fname = thread.result
-			if type(fname) == tuple: report_error(*fname)
+			if type(fname) == tuple: self.gui.window.report_callback_exception(*fname)
 			elif fname is not None:
 				bs = '\\'
 				self.gui.message = f'Compile successful! EXE saved to {fname}'
@@ -639,6 +645,7 @@ We apologize for any inconvenience caused by this issue.
 		else: self.gui.set_message_force('Compilation failed!')
 
 	def compile_thread(self, dname):
+		pyi_mode = hasattr(sys, '_MEIPASS')
 		fname = dname.replace('/', '\\')
 		exe_name = f'{self.gui.datafile["title"]}{".exe" if os.name == "nt" else ""}'
 		fname += os.sep + exe_name
@@ -675,8 +682,12 @@ except Exception: tk.messagebox.showerror('Error', gui.report_error(*sys.exc_inf
 			'--add-data', f'{self.gui.temp_path}/icon{".ico;" if os.name == "nt" else ".xbm:"}.',
 			]
 			if os.name == 'nt' or platform.system == 'Darwin': params.extend(['-i', f'{self.gui.temp_path}/icon.ico'])
+			#if pyi_mode:
+			#	retdir = os.getcwd()
+			#	os.chdir(sys._MEIPASS)
 			try: self.pyinstaller.run(params)
 			except SystemExit: pass
+			#if pyi_mode: os.chdir(retdir)
 			self.text = 'Cleaning up'
 			shutil.rmtree(tmpdir)
 			if os.path.exists(fname): return fname
