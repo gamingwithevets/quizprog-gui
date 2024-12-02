@@ -1649,11 +1649,11 @@ class Updater:
 
 	def check_internet(self):
 		try:
-			self.request('https://google.com', True)
+			urllib.request.urlopen('https://github.com')
 			return True
 		except: return False
 
-	def request(self, url, testing = False):
+	def request(self, url):
 		success = False
 		for i in range(self.request_limit):
 			try:
@@ -1661,12 +1661,10 @@ class Updater:
 				success = True
 				break
 			except:
-				if not testing:
-					if not self.check_internet(): return
+				if not self.check_internet(): return
 		if success:
-			if not testing:
-				d = r.read().decode()
-				return json.loads(d)
+			d = r.read().decode()
+			return json.loads(d)
 
 	def check_updates(self, prerelease):
 		self.progress = 0
