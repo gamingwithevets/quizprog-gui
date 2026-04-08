@@ -36,8 +36,8 @@ name = 'QuizProg-GUI'
 username = 'gamingwithevets'
 repo_name = 'quizprog-gui'
 
-version = '1.2.0'
-internal_version = 'v1.2.0'
+version = '1.2.0_01'
+internal_version = 'v1.2.0_01'
 prerelease = False
 
 license = 'Expat (MIT)'
@@ -1626,14 +1626,13 @@ New version: {title}{' (prerelease)' if prerelease else ''}\
 			import mdformat
 			import tkinterweb
 
-			html = tkinterweb.HtmlFrame(self.win, messages_enabled = False)
+			html = tkinterweb.HtmlFrame(self.win, messages_enabled = False, on_link_click = webbrowser.open_new_tab)
 			formatted_body = body
 			formatted_body = formatted_body.replace('(../..', f'(https://github.com/{username}/{repo_name}')
 			formatted_body = formatted_body.replace('(../../..', f'(https://github.com/{username}')
 			formatted_body = formatted_body.replace('(//', f'(https://')
 
 			html.load_html(markdown.markdown(formatted_body))
-			html.on_link_click(webbrowser.open_new_tab)
 			html.pack()
 
 		if self.auto: self.win.deiconify()
