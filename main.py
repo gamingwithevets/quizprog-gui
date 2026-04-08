@@ -27,7 +27,7 @@ import tkinter.messagebox
 if __name__ == '__main__':
 	try: import gui
 	except ImportError:
-		err_text = f'Whoops! The script "gui.py" is required.\nCan you make sure the script is in "{gui.temp_path}"?\n\n{traceback.format_exc()}\nIf this problem persists, please report it here:\nhttps://github.com/{gui.username}/{gui.repo_name}/issues'
+		err_text = f'Whoops! An error occured when attempting to import "gui.py".'
 		print(err_text)
 		tk.messagebox.showerror('Hmmm?', err_text)
 		sys.exit()
@@ -35,4 +35,4 @@ if __name__ == '__main__':
 	g = gui.GUI(sys.argv[1] if len(sys.argv) > 1 else '')
 	gui.g = g
 	try: g.start_main()
-	except Exception: tk.messagebox.showerror('Error', gui.report_error(*sys.exc_info(), True))
+	except Exception: tk.messagebox.showerror('Error', gui.report_error.__func__(*sys.exc_info(), True))

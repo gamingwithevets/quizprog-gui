@@ -22,11 +22,12 @@ import re
 import json
 import time
 import random
+import zipfile
 import importlib
 import threading
+import subprocess
 import webbrowser
 import configparser
-import pkg_resources
 import urllib.request
 from jsonhandler import JSONHandler
 
@@ -35,11 +36,11 @@ name = 'QuizProg-GUI'
 username = 'gamingwithevets'
 repo_name = 'quizprog-gui'
 
-version = '1.1.1'
-internal_version = 'v1.1.1'
+version = '1.2.0'
+internal_version = 'v1.2.0'
 prerelease = False
 
-license = 'MIT'
+license = 'Expat (MIT)'
 
 g = None
 
@@ -358,7 +359,7 @@ Project page: https://github.com/{username}/{repo_name}
 {nl+'WARNING: This is a pre-release version, therefore it may have bugs and/or glitches.'+nl if prerelease else ''}
 Licensed under the {license} license
 
-Copyright (c) 2022-2024 GamingWithEvets Inc.
+Copyright (c) 2022-2026 GamingWithEvets Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy \
 of this software and associated documentation files (the "Software"), to deal \
@@ -419,7 +420,7 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 			file_menu.add_separator()
 			self.window.bind('<Control-Shift-S>', lambda x: self.save_file_as())
 		if not self.player_mode:
-			file_menu.add_command(label = 'Compile EXE file', command = self.compile_exe.main)
+			file_menu.add_command(label = 'Compile executable file', command = self.compile_exe.main)
 			file_menu.add_separator()
 		file_menu.add_command(label = 'Exit', command = self.quit)
 		menubar.add_cascade(label = 'File', menu = file_menu)
@@ -461,7 +462,7 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 		if self.msg_label.winfo_exists():
 			if self.message_force: self.msg_label.config(text = self.message_force, background = 'red')
 			elif self.message: self.msg_label.config(text = self.message, background = 'green')
-			else: self.msg_label.config(text = f'QuizProg - GUI edition. Version {version}. © 2024 GamingWithEvets Inc.', background = 'black')
+			else: self.msg_label.config(text = f'QuizProg - GUI edition. Version {version}. © 2026 GamingWithEvets Inc.', background = 'black')
 			self.message = self.message_force = None
 			Tooltip(self.msg_label, self.msg_label['text'])
 
@@ -576,30 +577,25 @@ Architecture: {platform.machine()}{dnl+"Settings file is saved to working direct
 class CompileEXE:
 	def __init__(self, gui):
 		self.gui = gui
-		self.pyinstaller = None
 		self.text = ''
 
 	def compile_exe_head(self):
 		self.gui.refresh()
 		self.gui.print_msg()
 
-		ttk.Label(text = 'Compile EXE file', font = self.gui.bold_font).pack()
+		ttk.Label(text = 'Compile executable file', font = self.gui.bold_font).pack()
 		ttk.Label(text = '''
 IMPORTANT!
-Due to the nature of PyInstaller, the resulting EXE will only work on your operating system
-version onwards.
+Due to the nature of PyInstaller, the resulting executable will only work on your operating
+system version onwards.
 This is an issue with PyInstaller itself so we cannot do anything about it.
 We apologize for any inconvenience caused by this issue.
 ''', justify = 'center').pack()
 
 	def main(self):
-		if hasattr(sys, '_MEIPASS'):
-			tk.messagebox.showerror('Error', f'As of this time the Compile EXE feature does not work on binary versions of {name}. We are sorry for this inconvenience.')
-			return
-
-		try: self.pyinstaller = importlib.import_module('PyInstaller.__main__')
-		except ImportError:
-			tk.messagebox.showerror('PyInstaller required', 'The Compile EXE feature needs PyInstaller to function. Please run\n\npip install pyinstaller\n\nin a terminal before using this feature.')
+		if hasattr(sys, '_MEIPASS') and not os.path.exists(f'{self.gui.temp_path}/compiler_env.zip'):
+			if os.name != 'nt': tk.messagebox.showerror('Not supported', 'This feature does not work on non-Windows compiled executables. Please use this feature on the source version!')
+			else: tk.messagebox.showerror('Not supported', 'This executable file does not include an embeddable Python! Follow the instructions in the README to add an embeddable Python.')
 			return
 
 		if self.gui.prompt_save_changes(): return
@@ -611,7 +607,7 @@ We apologize for any inconvenience caused by this issue.
 		self.quit_button.pack(side = 'bottom')
 
 	def compile(self):
-		savefilename = tk.filedialog.askdirectory(title = 'Select resulting EXE location', initialdir = os.getcwd())
+		savefilename = tk.filedialog.askdirectory(title = 'Select output executable location', initialdir = os.getcwd())
 		if not savefilename: return
 
 		self.compile_button['state'] = 'disabled'
@@ -639,22 +635,27 @@ We apologize for any inconvenience caused by this issue.
 			if type(fname) == tuple: self.gui.window.report_callback_exception(*fname)
 			elif fname is not None:
 				bs = '\\'
-				self.gui.message = f'Compile successful! EXE saved to {fname}'
+				self.gui.message = f'Compile successful! Executable saved to {fname}'
 				self.gui.config_msg()
 			else: self.gui.set_message_force('Compilation failed!')
 		else: self.gui.set_message_force('Compilation failed!')
 
 	def compile_thread(self, dname):
 		pyi_mode = hasattr(sys, '_MEIPASS')
-		fname = dname.replace('/', '\\')
+		fname = dname
 		exe_name = f'{self.gui.datafile["title"]}{".exe" if os.name == "nt" else ""}'
 		fname += os.sep + exe_name
 		tmpdir = f'{self.gui.appdata_folder}/tmp{random.randint(0, 99999):05}'
 		qfile = f'quiz.{self.gui.datafile_mode}'
 
 		try:
-			self.text = 'Copying necessary files'
+			self.text = 'Setting up environment'
 			os.makedirs(tmpdir)
+			if pyi_mode:
+				with zipfile.ZipFile(f'{self.gui.temp_path}/compiler_env.zip', 'r') as z: z.extractall(f'{tmpdir}/python-embed')
+				python = f'{tmpdir}/python-embed/python.exe'
+			else: python = sys.executable
+			self.text = 'Copying necessary files'
 			shutil.copy(f'{self.gui.temp_path}/gui.py', tmpdir)
 			shutil.copy(f'{self.gui.temp_path}/jsonhandler.py', tmpdir)
 			with open(f'{tmpdir}/{qfile}', 'w', encoding = 'utf-8') as f:
@@ -671,23 +672,28 @@ try: g.start_main()
 except Exception: tk.messagebox.showerror('Error', gui.report_error(*sys.exc_info(), True))
 ''')
 				f.close()
+
+			env = os.environ.copy()
+			env.pop('TCL_LIBRARY', None)
+			env.pop('TK_LIBRARY', None)
+			env.pop('_MEIPASS2', None)
+			env.pop('PYTHONPATH', None)
+			env['TCL_LIBRARY'] = f'{tmpdir}/python-embed/tcl/tcl8.6'
+			env['TK_LIBRARY'] = f'{tmpdir}/python-embed/tcl/tk8.6'
+
 			self.text = 'Invoking PyInstaller\nThis may take a while'
 			params = [
-			f'{tmpdir}/main.py',
-			'-ywFn', self.gui.datafile['title'],
-			'--distpath', dname,
-			'--workpath', tmpdir,
-			'--specpath', tmpdir,
-			'--add-data', f'{tmpdir}/{qfile}{";" if os.name == "nt" else ":"}.',
-			'--add-data', f'{self.gui.temp_path}/icon{".ico;" if os.name == "nt" else ".xbm:"}.',
+				python, '-m', 'PyInstaller',
+				f'{tmpdir}/main.py',
+				'-ywFn', self.gui.datafile['title'],
+				'--distpath', dname,
+				'--workpath', tmpdir,
+				'--specpath', tmpdir,
+				'--add-data', f'{tmpdir}/{qfile}{";" if os.name == "nt" else ":"}.',
+				'--add-data', f'{self.gui.temp_path}/icon{".ico;" if os.name == "nt" else ".xbm:"}.',
 			]
 			if os.name == 'nt' or platform.system == 'Darwin': params.extend(['-i', f'{self.gui.temp_path}/icon.ico'])
-			#if pyi_mode:
-			#	retdir = os.getcwd()
-			#	os.chdir(sys._MEIPASS)
-			try: self.pyinstaller.run(params)
-			except SystemExit: pass
-			#if pyi_mode: os.chdir(retdir)
+			subprocess.run(params, check = True, env = env)
 			self.text = 'Cleaning up'
 			shutil.rmtree(tmpdir)
 			if os.path.exists(fname): return fname
@@ -1593,10 +1599,7 @@ While you\'re here, why don\'t you check out my [Discord server](//gamingwitheve
 
 	@staticmethod
 	def package_installed(package):
-		try: pkg_resources.get_distribution(package)
-		except pkg_resources.DistributionNotFound: return False
-
-		return True
+		return importlib.util.find_spec(package) is not None
 
 	def draw_download_msg(self, title, tag, prever, body):
 		if self.auto:
@@ -1614,7 +1617,7 @@ New version: {title}{' (prerelease)' if prerelease else ''}\
 		ttk.Label(self.win).pack()
 
 		packages_missing = []
-		for package in ('markdown', 'mdformat-gfm', 'tkinterweb'):
+		for package in ('markdown', 'mdformat', 'tkinterweb'):
 			if not self.package_installed(package): packages_missing.append(package)
 
 		if packages_missing: ttk.Label(self.win, text = f'Missing package(s): {", ".join(packages_missing[:2])}{" and " + str(len(packages_missing) - 2) + " others" if len(packages_missing) > 2 else ""}', font = self.gui.bold_font).pack()
